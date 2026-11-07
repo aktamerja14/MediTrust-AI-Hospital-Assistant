@@ -3,7 +3,7 @@ import logging
 from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.database.connection import get_db
@@ -14,10 +14,24 @@ from app.services.auth import AuthService
 
 logger = logging.getLogger("meditrust.api.dependencies")
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/auth/login",
-    auto_error=False,
-)
+http_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_token_from_header(
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(http_bearer)],
+) -> Optional[str]:
+    """
+    Extract Bearer token from Authorization header.
+
+    Args:
+        credentials: HTTP Bearer credentials from Authorization header.
+
+    Returns:
+        Token string if present, None otherwise.
+    """
+    if credentials is None:
+        return None
+    return credentials.credentials
 
 
 async def get_auth_service(
@@ -28,7 +42,7 @@ async def get_auth_service(
 
 
 async def get_token_payload(
-    token: Annotated[Optional[str], Depends(oauth2_scheme)],
+    token: Annotated[Optional[str], Depends(get_token_from_header)],
 ) -> TokenPayload:
     """
     Extract and validate JWT token payload.
