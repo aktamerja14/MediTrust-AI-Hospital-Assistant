@@ -1,0 +1,45 @@
+# ==============================================================================
+# MediTrust .gitignore
+# ==============================================================================
+
+# Environment variables & secrets (Protects backend/.env)
+.env
+.env.*
+backend/.env
+backend/.env.*
+!.env.example
+!backend/.env.example
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments (Preserves .venv at project root from git tracking)
+.venv/
+env/
+venv/
+ENV/
+
+# Build artifacts & distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor & IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Operating System files
+.DS_Store
+Thumbs.db
