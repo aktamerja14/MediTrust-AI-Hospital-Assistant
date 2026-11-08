@@ -2,11 +2,26 @@
 import os
 import pytest
 import pytest_asyncio
+from pathlib import Path
 from typing import AsyncGenerator
+from dotenv import load_dotenv
 
+# Load backend/.env before reading environment variables
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BACKEND_DIR / ".env")
+
+# Fail immediately if MONGODB_URL is missing or empty
+mongodb_uri = os.getenv("MONGODB_URL")
+if not mongodb_uri:
+    raise RuntimeError(
+        "MONGODB_URL environment variable is not set. "
+        "Tests require a valid MongoDB connection URI."
+    )
+
+# Configure test environment variables BEFORE importing application settings
 os.environ["ENVIRONMENT"] = "testing"
 os.environ["DATABASE_NAME"] = "meditrust_test"
-os.environ["MONGODB_URL"] = "mongodb+srv://ektamerja1411_db_user:Yo4uyoaOubmIStOa@expense-tracker.ks3eflb.mongodb.net/?appName=expense-tracker"
+os.environ["MONGODB_URL"] = mongodb_uri
 
 from app.core.config import settings
 from app.database.connection import DatabaseManager, get_db
@@ -16,7 +31,7 @@ from httpx import AsyncClient, ASGITransport
 
 
 TEST_DATABASE_NAME = "meditrust_test"
-TEST_MONGODB_URL = "mongodb+srv://ektamerja1411_db_user:Yo4uyoaOubmIStOa@expense-tracker.ks3eflb.mongodb.net/?appName=expense-tracker"
+TEST_MONGODB_URL = mongodb_uri
 DEV_DATABASE_NAME = "meditrust"
 
 
@@ -26,11 +41,6 @@ def verify_test_database() -> None:
         raise RuntimeError(
             f"Tests must use database '{TEST_DATABASE_NAME}', "
             f"but configuration has '{settings.DATABASE_NAME}'"
-        )
-    if settings.MONGODB_URL != TEST_MONGODB_URL:
-        raise RuntimeError(
-            f"Tests must use MongoDB URL '{TEST_MONGODB_URL}', "
-            f"but configuration has '{settings.MONGODB_URL}'"
         )
     if settings.ENVIRONMENT != "testing":
         raise RuntimeError(
