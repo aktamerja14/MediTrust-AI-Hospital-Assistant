@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     ARGON2_HASH_LEN: int = 32
     ARGON2_SALT_LEN: int = 16
 
+    # Document Storage Configuration
+    DOCUMENT_STORAGE_PATH: str = "data/documents"
+    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10 MB
+
     model_config = SettingsConfigDict(
         env_file=(str(BACKEND_ENV_FILE), ".env"),
         env_file_encoding="utf-8",
