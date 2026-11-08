@@ -172,3 +172,24 @@ class AuthService:
             token_type="bearer",
             expires_in=expire_minutes * 60,
         )
+
+    async def get_dashboard_stats(self) -> dict:
+        """
+        Get dashboard statistics.
+
+        Returns:
+            Dictionary with user statistics.
+        """
+        total_users = await self.collection.count_documents({})
+        total_patients = await self.collection.count_documents({"role": "patient"})
+        total_admins = await self.collection.count_documents({"role": "admin"})
+        active_users = await self.collection.count_documents({"is_active": True})
+        inactive_users = await self.collection.count_documents({"is_active": False})
+
+        return {
+            "total_users": total_users,
+            "total_patients": total_patients,
+            "total_admins": total_admins,
+            "active_users": active_users,
+            "inactive_users": inactive_users,
+        }

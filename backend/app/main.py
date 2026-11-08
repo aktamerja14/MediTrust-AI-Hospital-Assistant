@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.routes import health
 from app.api.routes.auth import router as auth_router
+from app.api.routes.admin import router as admin_router
 from app.database.connection import lifespan
 
 
@@ -32,6 +33,7 @@ def create_application() -> FastAPI:
     # Register API Routers
     app.include_router(health.router, prefix=settings.API_V1_STR)
     app.include_router(auth_router, prefix=settings.API_V1_STR)
+    app.include_router(admin_router, prefix=settings.API_V1_STR)
 
     @app.get("/", tags=["Root"])
     async def root() -> dict[str, str]:
