@@ -12,9 +12,6 @@
  */
 
 // API Configuration
-const API_BASE = 'http://127.0.0.1:8000/api/v1';
-const ADMIN_TOKEN_KEY = 'meditrust_admin_token';
-const ADMIN_USER_KEY = 'meditrust_admin_user';
 
 function getAdminAuthHeader() {
   const token = localStorage.getItem(ADMIN_TOKEN_KEY);
@@ -35,13 +32,13 @@ const AdminAuth = {
   checkExistingSession() {
     if (isAuthenticated(ADMIN_TOKEN_KEY)) {
       const user = getStoredUser(ADMIN_USER_KEY);
-      // Verify token is not expired by making a test request
+
       this.verifyToken().then(valid => {
         if (valid && user?.role === 'admin') {
           window.location.href = 'admin-dashboard.html';
-} else {
-        clearAuthData(true);
-      }
+        } else {
+          clearAuthData(true);
+        }
       }).catch(() => {
         clearAuthData(true);
       });
@@ -70,11 +67,9 @@ const AdminAuth = {
       const passwordInput = document.getElementById('adminPassword');
       const loginBtn = document.getElementById('loginBtn');
 
-      // Clear previous errors
       markValid(emailInput);
       markValid(passwordInput);
 
-      // Validation
       let isValid = true;
 
       if (!emailInput.value.trim() || !validateEmail(emailInput.value.trim())) {
@@ -109,20 +104,20 @@ const AdminAuth = {
         const data = await response.json();
 
         if (!response.ok) {
-          // Handle 401 Unauthorized specifically for invalid credentials
           if (response.status === 401) {
-            // Show error inline in the form (red error), keep email, clear password
             markInvalid(emailInput, 'Invalid email or password');
             passwordInput.value = '';
             setButtonLoading(loginBtn, false);
             return;
           }
+
           throw new Error(data.detail || 'Login failed');
         }
 
-        // Verify user is admin
         const meResponse = await fetch(`${API_BASE}/auth/me`, {
-          headers: { 'Authorization': `Bearer ${data.access_token}` }
+          headers: {
+            'Authorization': `Bearer ${data.access_token}`
+          }
         });
 
         if (!meResponse.ok) {
@@ -135,18 +130,15 @@ const AdminAuth = {
           throw new Error('Access denied. Administrator privileges required.');
         }
 
-        // Store auth data using shared auth.js function
         setAuthData(data.access_token, userData, true);
 
         showToast('Welcome back!', 'success');
 
-        // Redirect to dashboard
         setTimeout(() => {
           window.location.href = 'admin-dashboard.html';
         }, 500);
 
       } catch (error) {
-        // Network errors shown as toast
         if (error instanceof TypeError && error.message.includes('fetch')) {
           showToast('Unable to connect to the server. Please try again.', 'error');
         } else {
@@ -165,6 +157,7 @@ const AdminAuth = {
     if (toggleBtn && passwordInput) {
       toggleBtn.addEventListener('click', () => {
         const isPassword = passwordInput.type === 'password';
+
         passwordInput.type = isPassword ? 'text' : 'password';
         toggleBtn.setAttribute('aria-expanded', isPassword.toString());
       });
@@ -173,7 +166,9 @@ const AdminAuth = {
 
   logout() {
     clearAuthData(true);
+
     showToast('You have been signed out', 'info');
+
     setTimeout(() => {
       window.location.href = 'admin-login.html';
     }, 500);
@@ -186,6 +181,7 @@ const AdminAuth = {
     }
 
     const user = getStoredUser(ADMIN_USER_KEY);
+
     if (user?.role !== 'admin') {
       this.logout();
       return false;
@@ -242,12 +238,7 @@ const AdminDashboard = {
         headers: getAdminAuthHeader()
       });
 
-      if (response.status === 401) {
-        AdminAuth.logout();
-        return;
-      }
-
-      if (response.status === 403) {
+      if (response.status === 401 || response.status === 403) {
         AdminAuth.logout();
         return;
       }
@@ -258,6 +249,7 @@ const AdminDashboard = {
       }
 
       const data = await response.json();
+
       this.renderStats(data);
       this.showStats(true);
 
@@ -278,23 +270,42 @@ const AdminDashboard = {
       lastUpdated: document.getElementById('statLastUpdated')
     };
 
-    if (elements.totalUsers) elements.totalUsers.textContent = data.total_users?.toLocaleString() || '—';
-    if (elements.totalPatients) elements.totalPatients.textContent = data.total_patients?.toLocaleString() || '—';
-    if (elements.totalAdmins) elements.totalAdmins.textContent = data.total_admins?.toLocaleString() || '—';
-    if (elements.activeUsers) elements.activeUsers.textContent = data.active_users?.toLocaleString() || '—';
-    if (elements.inactiveUsers) elements.inactiveUsers.textContent = data.inactive_users?.toLocaleString() || '—';
-    if (elements.lastUpdated) elements.lastUpdated.textContent = formatRelativeTime(new Date().toISOString());
+    if (elements.totalUsers) {
+      elements.totalUsers.textContent = data.total_users?.toLocaleString() || '—';
+    }
+
+    if (elements.totalPatients) {
+      elements.totalPatients.textContent = data.total_patients?.toLocaleString() || '—';
+    }
+
+    if (elements.totalAdmins) {
+      elements.totalAdmins.textContent = data.total_admins?.toLocaleString() || '—';
+    }
+
+    if (elements.activeUsers) {
+      elements.activeUsers.textContent = data.active_users?.toLocaleString() || '—';
+    }
+
+    if (elements.inactiveUsers) {
+      elements.inactiveUsers.textContent = data.inactive_users?.toLocaleString() || '—';
+    }
+
+    if (elements.lastUpdated) {
+      elements.lastUpdated.textContent = formatRelativeTime(new Date().toISOString());
+    }
   },
 
   showLoading(show) {
-    const loading = document.getElementById('dashboardLoading');
-    const statsGrid = document.getElementById('dashboardStatsGrid');
-    if (loading) loading.classList.toggle('hidden', !show);
-    if (statsGrid) statsGrid.classList.toggle('hidden', show);
+    const loading = document.getElementById('documentsLoading');
+
+    if (loading) {
+      loading.classList.toggle('hidden', !show);
+    }
   },
 
   showStats(show) {
     const statsGrid = document.getElementById('dashboardStatsGrid');
+
     if (statsGrid) statsGrid.classList.toggle('hidden', !show);
   },
 
@@ -334,13 +345,10 @@ const AdminDocuments = {
   },
 
   bindEvents() {
-    // Prevent duplicate event listener registration
-    if (this.eventsBound) {
-      return;
-    }
+    if (this.eventsBound) return;
+
     this.eventsBound = true;
 
-    // Upload modal
     const openUploadBtn = document.getElementById('openUploadModalBtn');
     const closeUploadBtn = document.getElementById('closeUploadModal');
     const cancelUploadBtn = document.getElementById('cancelUploadBtn');
@@ -348,7 +356,6 @@ const AdminDocuments = {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
     const removeFileBtn = document.getElementById('removeFileBtn');
-    const submitUploadBtn = document.getElementById('submitUploadBtn');
 
     if (openUploadBtn) {
       openUploadBtn.addEventListener('click', () => this.openUploadModal());
@@ -366,9 +373,9 @@ const AdminDocuments = {
       uploadForm.addEventListener('submit', (e) => this.handleUpload(e));
     }
 
-    // Drop zone events
     if (dropZone && fileInput) {
       dropZone.addEventListener('click', () => fileInput.click());
+
       dropZone.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -388,7 +395,9 @@ const AdminDocuments = {
       dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
+
         const files = e.dataTransfer.files;
+
         if (files.length > 0) {
           this.handleFileSelect(files[0]);
         }
@@ -408,8 +417,10 @@ const AdminDocuments = {
       });
     }
 
-    // Delete modal
-    const closeDeleteBtn = document.getElementById('closeDeleteModal') || document.getElementById('cancelDeleteBtn');
+    const closeDeleteBtn =
+      document.getElementById('closeDeleteModal') ||
+      document.getElementById('cancelDeleteBtn');
+
     const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
 
     if (closeDeleteBtn) {
@@ -420,7 +431,6 @@ const AdminDocuments = {
       confirmDeleteBtn.addEventListener('click', () => this.confirmDelete());
     }
 
-    // Pagination
     const prevBtn = document.getElementById('prevPageBtn');
     const nextBtn = document.getElementById('nextPageBtn');
     const retryBtn = document.getElementById('retryDocumentsBtn');
@@ -442,7 +452,6 @@ const AdminDocuments = {
       emptyUploadBtn.addEventListener('click', () => this.openUploadModal());
     }
 
-    // Close modals on overlay click
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) {
@@ -451,7 +460,6 @@ const AdminDocuments = {
       });
     });
 
-    // Escape key to close modals
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeAllModals();
@@ -459,7 +467,6 @@ const AdminDocuments = {
     });
   },
 
-  // Upload Modal
   openUploadModal() {
     this.resetUploadForm();
     openModal('uploadModal');
@@ -485,15 +492,20 @@ const AdminDocuments = {
     if (dropZoneContent) dropZoneContent.classList.remove('hidden');
     if (dropZonePreview) dropZonePreview.classList.add('hidden');
     if (fileInput) fileInput.value = '';
+
     if (uploadError) {
       uploadError.hidden = true;
       uploadError.textContent = '';
     }
+
     if (uploadProgress) uploadProgress.classList.add('hidden');
+
     if (submitBtn) {
       submitBtn.disabled = true;
       setButtonLoading(submitBtn, false);
     }
+
+    this.selectedFile = null;
   },
 
   handleFileSelect(file) {
@@ -504,9 +516,13 @@ const AdminDocuments = {
     const uploadError = document.getElementById('uploadError');
     const submitBtn = document.getElementById('submitUploadBtn');
 
-    // Validate file
-    const isPdf = file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
-    const isTxt = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt');
+    const isPdf =
+      file.type.includes('pdf') ||
+      file.name.toLowerCase().endsWith('.pdf');
+
+    const isTxt =
+      file.type === 'text/plain' ||
+      file.name.toLowerCase().endsWith('.txt');
 
     if (!isPdf && !isTxt) {
       this.showUploadError('Please select a PDF or TXT file');
@@ -523,7 +539,6 @@ const AdminDocuments = {
       return;
     }
 
-    // Show preview
     if (dropZoneContent) dropZoneContent.classList.add('hidden');
     if (dropZonePreview) dropZonePreview.classList.remove('hidden');
     if (previewFileName) previewFileName.textContent = file.name;
@@ -531,139 +546,139 @@ const AdminDocuments = {
     if (uploadError) uploadError.hidden = true;
     if (submitBtn) submitBtn.disabled = false;
 
-    // Store file for upload
     this.selectedFile = file;
   },
 
   clearFileSelection() {
+    const dropZoneContent = document.getElementById('dropZoneContent');
+    const dropZonePreview = document.getElementById('dropZonePreview');
+    const fileInput = document.getElementById('fileInput');
+    const submitBtn = document.getElementById('submitUploadBtn');
+    const uploadError = document.getElementById('uploadError');
+
     this.selectedFile = null;
-    this.resetUploadForm();
+
+    if (fileInput) fileInput.value = '';
+    if (dropZoneContent) dropZoneContent.classList.remove('hidden');
+    if (dropZonePreview) dropZonePreview.classList.add('hidden');
+    if (submitBtn) submitBtn.disabled = true;
+
+    if (uploadError) {
+      uploadError.hidden = true;
+      uploadError.textContent = '';
+    }
   },
 
   showUploadError(message) {
     const uploadError = document.getElementById('uploadError');
-    const submitBtn = document.getElementById('submitUploadBtn');
 
     if (uploadError) {
       uploadError.textContent = message;
       uploadError.hidden = false;
+    } else {
+      showToast(message, 'error');
     }
-    if (submitBtn) submitBtn.disabled = true;
   },
 
   async handleUpload(e) {
     e.preventDefault();
 
-    // Prevent duplicate uploads
-    if (this.isUploading) {
-      return;
-    }
+    if (this.isUploading) return;
 
     if (!this.selectedFile) {
       this.showUploadError('Please select a file first');
       return;
     }
 
-    this.isUploading = true;
+    const title = this.selectedFile.name;
+    const description = '';
+
+    const formData = new FormData();
+
+    formData.append('file', this.selectedFile);
+    formData.append('title', title);
+    formData.append('description', description);
 
     const submitBtn = document.getElementById('submitUploadBtn');
-    const uploadProgress = document.getElementById('uploadProgress');
-    const progressFill = document.getElementById('progressFill');
-    const progressText = document.getElementById('progressText');
-    const progressPercent = document.getElementById('progressPercent');
-    const uploadError = document.getElementById('uploadError');
 
+    this.isUploading = true;
     setButtonLoading(submitBtn, true);
-    if (uploadProgress) uploadProgress.classList.remove('hidden');
-    if (uploadError) uploadError.hidden = true;
 
-    // Simulate progress for better UX (since we can't track actual upload progress with fetch easily)
-    let progress = 0;
-    const progressInterval = setInterval(() => {
-      progress += Math.random() * 15;
-      if (progress > 90) progress = 90;
-      if (progressFill) progressFill.style.width = `${progress}%`;
-      if (progressPercent) progressPercent.textContent = `${Math.round(progress)}%`;
-    }, 200);
+    const uploadProgress = document.getElementById('uploadProgress');
+
+    if (uploadProgress) {
+      uploadProgress.classList.remove('hidden');
+    }
 
     try {
-      const formData = new FormData();
-      formData.append('file', this.selectedFile);
-
       const response = await fetch(`${API_BASE}/admin/documents/upload`, {
         method: 'POST',
         headers: getAdminAuthHeader(),
         body: formData
       });
 
-      clearInterval(progressInterval);
+      const data = await response.json().catch(() => ({}));
 
-      if (response.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         AdminAuth.logout();
         return;
       }
-
-      if (response.status === 403) {
-        AdminAuth.logout();
-        return;
-      }
-
-      if (progressFill) progressFill.style.width = '100%';
-      if (progressPercent) progressPercent.textContent = '100%';
-      if (progressText) progressText.textContent = 'Processing...';
-
-      const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Upload failed');
+        throw new Error(data.detail || 'Document upload failed');
       }
 
-      showToast(`Document "${data.original_filename}" uploaded successfully`, 'success');
+      showToast('Document uploaded successfully!', 'success');
+
       this.closeUploadModal();
-      this.loadDocuments();
+
+      await this.loadDocuments();
 
     } catch (error) {
-      clearInterval(progressInterval);
       this.showUploadError(error.message);
-      if (uploadProgress) uploadProgress.classList.add('hidden');
     } finally {
       this.isUploading = false;
       setButtonLoading(submitBtn, false);
+
+      if (uploadProgress) {
+        uploadProgress.classList.add('hidden');
+      }
     }
   },
 
-  // Load Documents
-  async loadDocuments(page = 1) {
-    this.currentPage = page;
-    this.showLoading(true);
-    this.showError(false);
+  async loadDocuments() {
+  this.showLoading(true);
+  this.showError(false);
 
-    try {
-      const response = await fetch(`${API_BASE}/admin/documents?page=${page}&page_size=${this.pageSize}`, {
+  try {
+    const response = await fetch(
+      `${API_BASE}/admin/documents?page=${this.currentPage}&page_size=${this.pageSize}`,
+      {
         headers: getAdminAuthHeader()
-      });
-
-      if (response.status === 401) {
-        AdminAuth.logout();
-        return;
       }
+    );
 
-      if (response.status === 403) {
-        AdminAuth.logout();
-        return;
-      }
+    if (response.status === 401 || response.status === 403) {
+      AdminAuth.logout();
+      return;
+    }
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || 'Failed to load documents');
-      }
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.detail || 'Failed to load documents');
+    }
 
-      const data = await response.json();
-      this.renderDocuments(data.documents);
-      this.updatePagination(data);
-      this.showTable(true);
+    const data = await response.json();
+
+    this.totalDocuments = data.total || 0;
+    this.totalPages = data.total_pages || 0;
+
+    this.renderDocuments(data.documents || []);
+    this.renderPagination();
+    this.showContent((data.documents || []).length > 0);
 
     } catch (error) {
+      console.error('Documents loading error:', error);
       this.showError(true, error.message);
     } finally {
       this.showLoading(false);
@@ -671,361 +686,570 @@ const AdminDocuments = {
   },
 
   renderDocuments(documents) {
-    const tbody = document.getElementById('documentsTableBody');
+  const tbody = document.getElementById('documentsTableBody');
+  const emptyState = document.getElementById('documentsEmpty');
+
+  if (!tbody) {
+    console.error('documentsTableBody element not found');
+    return;
+  }
+
+  tbody.innerHTML = '';
+
+  if (!documents || documents.length === 0) {
+    if (emptyState) {
+      emptyState.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (emptyState) {
+    emptyState.classList.add('hidden');
+  }
+
+  documents.forEach(doc => {
+    const row = document.createElement('tr');
+
+    row.dataset.documentId = doc.document_id;
+
+    row.innerHTML = `
+      <td>
+        <div class="doc-name">
+          <span class="name"
+            title="${escapeHTML(doc.original_filename)}">
+            ${escapeHTML(doc.original_filename)}
+          </span>
+
+          <span class="id">
+            ${escapeHTML(doc.document_id)}
+          </span>
+        </div>
+      </td>
+
+      <td class="file-size">
+        ${formatFileSize(doc.file_size)}
+      </td>
+
+      <td class="upload-date">
+        ${formatDate(doc.upload_timestamp)}
+      </td>
+
+      <td>
+        <span class="status-badge status-${escapeHTML(doc.processing_status || 'uploaded')}">
+          ${escapeHTML(doc.processing_status || 'uploaded')}
+        </span>
+      </td>
+
+      <td>
+        <button
+          type="button"
+          class="action-btn action-delete"
+          data-document-id="${escapeHTML(doc.document_id)}"
+          data-document-name="${escapeHTML(doc.original_filename)}">
+          Delete
+        </button>
+      </td>
+    `;
+
+    tbody.appendChild(row);
+  });
+
+  tbody.querySelectorAll('.action-delete').forEach(btn => {
+    btn.addEventListener('click', () => {
+      this.openDeleteModal(
+        btn.dataset.documentId,
+        btn.dataset.documentName
+      );
+    });
+  });
+},
+
+  showLoading(show) {
+    const loading = document.getElementById('documentsLoading');
+    const tableContainer = document.getElementById('documentsTableContainer');
+
+    if (loading) {
+      loading.classList.toggle('hidden', !show);
+    }
+
+    if (tableContainer && show) {
+      tableContainer.classList.add('hidden');
+    }
+  },
+
+  showContent(hasDocuments) {
+    const tableContainer = document.getElementById(
+      'documentsTableContainer'
+    );
+
     const emptyState = document.getElementById('documentsEmpty');
 
-    if (!tbody) return;
-
-    if (!documents || documents.length === 0) {
-      tbody.innerHTML = '';
-      this.showTable(false);
-      if (emptyState) emptyState.classList.remove('hidden');
-      return;
+    if (tableContainer) {
+      tableContainer.classList.toggle('hidden', !hasDocuments);
     }
 
-    if (emptyState) emptyState.classList.add('hidden');
-
-    tbody.innerHTML = documents.map(doc => `
-      <tr data-document-id="${doc.document_id}">
-        <td>
-          <div class="doc-name">
-            <span class="name" title="${this.escapeHtml(doc.original_filename)}">${this.escapeHtml(doc.original_filename)}</span>
-            <span class="id">${this.escapeHtml(doc.document_id)}</span>
-          </div>
-        </td>
-        <td class="file-size">${formatFileSize(doc.file_size)}</td>
-        <td class="upload-date">${formatDate(doc.upload_timestamp)}</td>
-        <td>
-          <span class="status-badge status-${doc.processing_status || 'uploaded'}">
-            ${this.escapeHtml(doc.processing_status || 'uploaded')}
-          </span>
-        </td>
-        <td>
-          <button type="button" class="action-btn action-delete" aria-label="Delete ${this.escapeHtml(doc.original_filename)}" data-document-id="${doc.document_id}" data-document-name="${this.escapeHtml(doc.original_filename)}">
-            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v12M10 3h4a1 1 0 011 1v3H9V4a1 1 0 011-1z"></path></svg>
-          </button>
-        </td>
-      </tr>
-    `).join('');
-
-    // Bind delete buttons
-    tbody.querySelectorAll('.action-delete').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const docId = btn.dataset.documentId;
-        const docName = btn.dataset.documentName;
-        this.openDeleteModal(docId, docName);
-      });
-    });
+    if (emptyState) {
+      emptyState.classList.toggle('hidden', hasDocuments);
+    }
   },
 
-  updatePagination(data) {
-    this.totalPages = data.total_pages || 0;
-    this.totalDocuments = data.total || 0;
+  showError(show, message = 'Unable to load documents') {
+    const errorEl = document.getElementById('documentsError');
+    const messageEl = document.getElementById('documentsErrorMessage');
 
-    const pagination = document.getElementById('pagination');
-    const pagesContainer = document.getElementById('paginationPages');
+    if (errorEl) errorEl.classList.toggle('hidden', !show);
+    if (messageEl) messageEl.textContent = message;
+  },
+    renderPagination() {
+    const currentPageEl = document.getElementById('currentPage');
+    const totalPagesEl = document.getElementById('totalPages');
+    const totalDocumentsEl = document.getElementById('totalDocuments');
     const prevBtn = document.getElementById('prevPageBtn');
     const nextBtn = document.getElementById('nextPageBtn');
-    const paginationInfo = document.getElementById('paginationInfo');
+    const pagination = document.getElementById('documentsPagination');
 
-    if (this.totalPages <= 1) {
-      if (pagination) pagination.hidden = true;
-      return;
+    if (currentPageEl) {
+      currentPageEl.textContent = this.currentPage;
     }
 
-    if (pagination) pagination.hidden = false;
-
-    // Update buttons
-    if (prevBtn) prevBtn.disabled = this.currentPage <= 1;
-    if (nextBtn) nextBtn.disabled = this.currentPage >= this.totalPages;
-
-    // Generate page numbers
-    if (pagesContainer) {
-      const pages = this.getPageNumbers(this.currentPage, this.totalPages);
-      pagesContainer.innerHTML = pages.map(page => {
-        if (page === '...') {
-          return '<span class="pagination-ellipsis">…</span>';
-        }
-        const isActive = page === this.currentPage;
-        return `<button type="button" class="pagination-page ${isActive ? 'active' : ''}" data-page="${page}" ${isActive ? 'aria-current="page"' : ''}>${page}</button>`;
-      }).join('');
-
-      // Bind page buttons
-      pagesContainer.querySelectorAll('.pagination-page').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const page = parseInt(btn.dataset.page, 10);
-          this.goToPage(page);
-        });
-      });
+    if (totalPagesEl) {
+      totalPagesEl.textContent = this.totalPages;
     }
 
-    // Update info
-    const start = (this.currentPage - 1) * this.pageSize + 1;
-    const end = Math.min(this.currentPage * this.pageSize, this.totalDocuments);
-    if (paginationInfo) {
-      paginationInfo.textContent = `${start}-${end} of ${this.totalDocuments}`;
-    }
-  },
-
-  getPageNumbers(current, total) {
-    const pages = [];
-    const maxVisible = 5;
-
-    if (total <= maxVisible) {
-      for (let i = 1; i <= total; i++) pages.push(i);
-      return pages;
+    if (totalDocumentsEl) {
+      totalDocumentsEl.textContent = this.totalDocuments;
     }
 
-    let start = Math.max(1, current - Math.floor(maxVisible / 2));
-    let end = start + maxVisible - 1;
-
-    if (end > total) {
-      end = total;
-      start = total - maxVisible + 1;
+    if (prevBtn) {
+      prevBtn.disabled = this.currentPage <= 1;
     }
 
-    if (start > 1) {
-      pages.push(1);
-      if (start > 2) pages.push('...');
+    if (nextBtn) {
+      nextBtn.disabled =
+        this.totalPages === 0 || this.currentPage >= this.totalPages;
     }
 
-    for (let i = start; i <= end; i++) {
-      pages.push(i);
+    if (pagination) {
+      pagination.classList.toggle('hidden', this.totalDocuments === 0);
     }
-
-    if (end < total) {
-      if (end < total - 1) pages.push('...');
-      pages.push(total);
-    }
-
-    return pages;
   },
 
   goToPage(page) {
-    if (page < 1 || page > this.totalPages || page === this.currentPage) return;
-    this.loadDocuments(page);
+    if (page < 1 || page > this.totalPages) return;
+
+    this.currentPage = page;
+    this.loadDocuments();
   },
 
-  // Delete Modal
-  openDeleteModal(documentId, documentName) {
-    this.selectedDocumentId = documentId;
-    const deleteDocName = document.getElementById('deleteDocName');
-    const confirmBtn = document.getElementById('confirmDeleteBtn');
-
-    if (deleteDocName) deleteDocName.textContent = documentName;
-    if (confirmBtn) {
-      confirmBtn.disabled = false;
-      setButtonLoading(confirmBtn, false);
+  openDeleteModal(documentId) {
+    if (!documentId) {
+      showToast('Invalid document ID', 'error');
+      return;
     }
 
-    openModal('deleteModal');
+    this.selectedDocumentId = documentId;
+
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteDocumentName = document.getElementById('deleteDocumentName');
+
+    if (deleteDocumentName) {
+      deleteDocumentName.textContent = 'this document';
+    }
+
+    if (deleteModal) {
+      openModal('deleteModal');
+    } else {
+      const confirmed = window.confirm(
+        'Are you sure you want to delete this document?'
+      );
+
+      if (confirmed) {
+        this.confirmDelete();
+      }
+    }
   },
 
   closeDeleteModal() {
-    this.selectedDocumentId = null;
     closeModal('deleteModal');
+    this.selectedDocumentId = null;
   },
 
   async confirmDelete() {
     if (!this.selectedDocumentId) return;
 
-    const confirmBtn = document.getElementById('confirmDeleteBtn');
-    setButtonLoading(confirmBtn, true);
+    const deleteBtn = document.getElementById('confirmDeleteBtn');
+
+    setButtonLoading(deleteBtn, true);
 
     try {
-      const response = await fetch(`${API_BASE}/admin/documents/${this.selectedDocumentId}`, {
-        method: 'DELETE',
-        headers: getAdminAuthHeader()
-      });
+      const response = await fetch(
+        `${API_BASE}/admin/documents/${encodeURIComponent(this.selectedDocumentId)}`,
+        {
+          method: 'DELETE',
+          headers: getAdminAuthHeader()
+        }
+      );
 
-      if (response.status === 401) {
-        AdminAuth.logout();
-        return;
-      }
+      const data = await response.json().catch(() => ({}));
 
-      if (response.status === 403) {
+      if (response.status === 401 || response.status === 403) {
         AdminAuth.logout();
         return;
       }
 
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.detail || 'Failed to delete document');
       }
 
       showToast('Document deleted successfully', 'success');
+
       this.closeDeleteModal();
-      this.loadDocuments(this.currentPage);
+
+      if (this.currentPage > 1 && this.totalDocuments - 1 <=
+          (this.currentPage - 1) * this.pageSize) {
+        this.currentPage--;
+      }
+
+      await this.loadDocuments();
 
     } catch (error) {
       showToast(error.message, 'error');
     } finally {
-      setButtonLoading(confirmBtn, false);
+      setButtonLoading(deleteBtn, false);
     }
-  },
-
-  // UI State Helpers
-  showLoading(show) {
-    const loading = document.getElementById('documentsLoading');
-    const tableContainer = document.getElementById('documentsTableContainer');
-    const emptyState = document.getElementById('documentsEmpty');
-
-    if (loading) loading.classList.toggle('hidden', !show);
-    if (tableContainer) tableContainer.classList.toggle('hidden', show);
-    if (emptyState) emptyState.classList.toggle('hidden', show);
-  },
-
-  showTable(show) {
-    const tableContainer = document.getElementById('documentsTableContainer');
-    const emptyState = document.getElementById('documentsEmpty');
-
-    if (tableContainer) tableContainer.classList.toggle('hidden', !show);
-    if (emptyState) emptyState.classList.toggle('hidden', show);
-  },
-
-  showError(show, message = 'Failed to load documents. Please try again.') {
-    const errorEl = document.getElementById('documentsError');
-    const messageEl = document.getElementById('documentsErrorMessage');
-    const tableContainer = document.getElementById('documentsTableContainer');
-    const emptyState = document.getElementById('documentsEmpty');
-
-    if (errorEl) errorEl.classList.toggle('hidden', !show);
-    if (messageEl) messageEl.textContent = message;
-    if (tableContainer) tableContainer.classList.toggle('hidden', show);
-    if (emptyState) emptyState.classList.toggle('hidden', show);
-  },
-
-  escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
   }
 };
 
 // ============================================================================
-// Initialize on DOM Ready
+// Common UI Helpers
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Check which page we're on and initialize accordingly
-  // Note: admin-login-page is handled by auth.js (LoginPage.init)
-  if (document.body.classList.contains('admin-dashboard-page')) {
-    AdminDashboard.init();
-  } else if (document.body.classList.contains('admin-documents-page')) {
-    AdminDocuments.init();
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => {
+    const entities = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    };
+
+    return entities[char];
+  });
+}
+
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Bytes';
+
+  const units = ['Bytes', 'KB', 'MB', 'GB'];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
+
+  return `${(bytes / Math.pow(1024, index)).toFixed(2)} ${units[index]}`;
+}
+
+function formatDate(dateValue) {
+  if (!dateValue) return '—';
+
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function formatRelativeTime(dateValue) {
+  if (!dateValue) return '—';
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  const diff = Date.now() - date.getTime();
+  const seconds = Math.floor(diff / 1000);
+
+  if (seconds < 60) return 'Just now';
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minutes ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hours ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days} days ago`;
+}
+
+function showToast(message, type = 'info') {
+  let container = document.getElementById('toastContainer');
+
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
   }
-});
 
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.setAttribute('role', 'status');
+  toast.textContent = message;
+
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add('show');
+  });
+
+  setTimeout(() => {
+    toast.classList.remove('show');
+
+    setTimeout(() => {
+      toast.remove();
+    }, 300);
+  }, 4000);
+}
+
+function setButtonLoading(button, loading) {
+  if (!button) return;
+
+  button.disabled = loading;
+
+  if (loading) {
+    if (!button.dataset.originalText) {
+      button.dataset.originalText = button.textContent.trim();
+    }
+
+    button.textContent = 'Please wait...';
+  } else if (button.dataset.originalText) {
+    button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+  }
+}
+
+function markInvalid(input, message) {
+  if (!input) return;
+
+  input.classList.add('invalid');
+  input.setAttribute('aria-invalid', 'true');
+
+  const error = input.parentElement?.querySelector('.field-error');
+
+  if (error) {
+    error.textContent = message;
+    error.classList.remove('hidden');
+  }
+}
+
+function markValid(input) {
+  if (!input) return;
+
+  input.classList.remove('invalid');
+  input.removeAttribute('aria-invalid');
+
+  const error = input.parentElement?.querySelector('.field-error');
+
+  if (error) {
+    error.textContent = '';
+    error.classList.add('hidden');
+  }
+}
+
+function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
 // ============================================================================
-// Admin UI Helper Functions
+// Authentication and User Display Helpers
 // ============================================================================
 
 function updateUserDisplay() {
   const user = getStoredUser(ADMIN_USER_KEY);
+
   if (!user) return;
 
-  const userAvatar = document.getElementById('userAvatar');
-  const userName = document.getElementById('userName');
-  const dropdownAvatar = document.getElementById('dropdownAvatar');
-  const dropdownUserName = document.getElementById('dropdownUserName');
-  const dropdownUserRole = document.getElementById('dropdownUserRole');
+  const name =
+    user.full_name ||
+    user.name ||
+    user.username ||
+    user.email ||
+    'Admin';
 
-  const initials = user.email ? user.email.charAt(0).toUpperCase() : 'A';
+  const email = user.email || '';
 
-  if (userAvatar) userAvatar.textContent = initials;
-  if (userName) userName.textContent = user.email || 'Admin';
-  if (dropdownAvatar) dropdownAvatar.textContent = initials;
-  if (dropdownUserName) dropdownUserName.textContent = user.email || 'Admin User';
-  if (dropdownUserRole) dropdownUserRole.textContent = user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'Administrator';
+  const nameElements = document.querySelectorAll(
+    '#adminName, #userName, .admin-name, .user-name'
+  );
+
+  const emailElements = document.querySelectorAll(
+    '#adminEmailDisplay, #userEmail, .admin-email, .user-email'
+  );
+
+  const avatarElements = document.querySelectorAll(
+    '#adminAvatar, #userAvatar, .admin-avatar, .user-avatar'
+  );
+
+  nameElements.forEach(el => {
+    el.textContent = name;
+  });
+
+  emailElements.forEach(el => {
+    el.textContent = email;
+  });
+
+  avatarElements.forEach(el => {
+    el.textContent = name.charAt(0).toUpperCase();
+  });
 }
+
+// ============================================================================
+// Sidebar Navigation
+// ============================================================================
 
 function initSidebar() {
   const sidebarToggle = document.getElementById('sidebarToggle');
-  const adminSidebar = document.getElementById('adminSidebar');
-  const sidebarOverlay = document.getElementById('sidebarOverlay');
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
 
-  if (!sidebarToggle || !adminSidebar || !sidebarOverlay) return;
+  if (sidebarToggle && sidebar) {
+    sidebarToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('active');
 
-  function toggleSidebar() {
-    const isOpen = adminSidebar.classList.toggle('open');
-    sidebarOverlay.classList.toggle('active', isOpen);
-    sidebarToggle.setAttribute('aria-expanded', isOpen.toString());
-    document.body.style.overflow = isOpen ? 'hidden' : '';
-  }
-
-  function closeSidebar() {
-    adminSidebar.classList.remove('open');
-    sidebarOverlay.classList.remove('active');
-    sidebarToggle.setAttribute('aria-expanded', 'false');
-    document.body.style.overflow = '';
-  }
-
-  sidebarToggle.addEventListener('click', toggleSidebar);
-  sidebarOverlay.addEventListener('click', closeSidebar);
-
-  // Close sidebar on navigation link click (mobile)
-  document.querySelectorAll('.admin-nav-link').forEach(link => {
-    link.addEventListener('click', () => {
-      if (window.innerWidth < 992) {
-        closeSidebar();
+      if (overlay) {
+        overlay.classList.toggle('active');
       }
     });
-  });
+  }
 
-  // Handle escape key
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && adminSidebar.classList.contains('open')) {
-      closeSidebar();
+  if (overlay && sidebar) {
+    overlay.addEventListener('click', () => {
+      sidebar.classList.remove('active');
+      overlay.classList.remove('active');
+    });
+  }
+
+  const currentPage = window.location.pathname.split('/').pop();
+
+  document.querySelectorAll('.sidebar a, .nav-link').forEach(link => {
+    const href = link.getAttribute('href');
+
+    if (href && href.split('/').pop() === currentPage) {
+      link.classList.add('active');
     }
   });
 }
 
+// ============================================================================
+// Admin Profile Dropdown
+// ============================================================================
+
 function initUserMenu() {
-  const userMenuTrigger = document.getElementById('userMenuTrigger');
+  const userMenuBtn = document.getElementById('userMenuTrigger');
   const userDropdown = document.getElementById('userDropdown');
   const logoutBtn = document.getElementById('logoutBtn');
 
-  if (!userMenuTrigger || !userDropdown) return;
+  if (userMenuBtn && userDropdown) {
+    userMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
 
-  function toggleDropdown() {
-    const isOpen = userDropdown.getAttribute('aria-hidden') === 'false';
-    userDropdown.setAttribute('aria-hidden', isOpen ? 'true' : 'false');
-    userMenuTrigger.setAttribute('aria-expanded', (!isOpen).toString());
+      const isOpen = userDropdown.classList.toggle('show');
+
+      userMenuBtn.setAttribute('aria-expanded', String(isOpen));
+      userDropdown.setAttribute('aria-hidden', String(!isOpen));
+    });
+
+    document.addEventListener('click', (e) => {
+      if (
+        !userMenuBtn.contains(e.target) &&
+        !userDropdown.contains(e.target)
+      ) {
+        userDropdown.classList.remove('show');
+        userMenuBtn.setAttribute('aria-expanded', 'false');
+        userDropdown.setAttribute('aria-hidden', 'true');
+      }
+    });
   }
-
-  function closeDropdown() {
-    userDropdown.setAttribute('aria-hidden', 'true');
-    userMenuTrigger.setAttribute('aria-expanded', 'false');
-  }
-
-  userMenuTrigger.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleDropdown();
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!userMenuTrigger.contains(e.target) && !userDropdown.contains(e.target)) {
-      closeDropdown();
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      closeDropdown();
-    }
-  });
 
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-      AdminAuth.logout();
-    });
+    logoutBtn.addEventListener('click', () => AdminAuth.logout());
   }
 }
 
 // ============================================================================
-// Export for global access (if needed)
+// Modal Helpers
 // ============================================================================
 
-window.AdminAuth = AdminAuth;
-window.AdminDashboard = AdminDashboard;
-window.AdminDocuments = AdminDocuments;
+function openModal(modalId) {
+  const modal = document.getElementById(modalId);
+
+  if (!modal) return;
+
+  modal.classList.remove('hidden');
+  modal.classList.add('active', 'show');
+
+  modal.setAttribute('aria-hidden', 'false');
+
+  document.body.classList.add('modal-open');
+}
+
+function closeModal(modalId) {
+  const modal = document.getElementById(modalId);
+
+  if (!modal) return;
+
+  modal.classList.add('hidden');
+  modal.classList.remove('active', 'show');
+
+  modal.setAttribute('aria-hidden', 'true');
+
+  if (!document.querySelector('.modal-overlay.active, .modal-overlay.show')) {
+    document.body.classList.remove('modal-open');
+  }
+}
+
+function closeAllModals() {
+  document.querySelectorAll('.modal-overlay').forEach(modal => {
+    modal.classList.add('hidden');
+    modal.classList.remove('active', 'show');
+    modal.setAttribute('aria-hidden', 'true');
+  });
+
+  document.body.classList.remove('modal-open');
+}
+
+// ============================================================================
+// Application Initialization
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  const currentPage = window.location.pathname.split('/').pop();
+
+  switch (currentPage) {
+    case 'admin-login.html':
+      AdminAuth.initLoginPage();
+      break;
+
+    case 'admin-dashboard.html':
+      AdminDashboard.init();
+      break;
+
+    case 'admin-documents.html':
+      AdminDocuments.init();
+      break;
+
+    default:
+      // Initialize common admin UI on other admin pages
+      if (document.body.classList.contains('admin-page')) {
+        if (AdminAuth.requireAuth()) {
+          updateUserDisplay();
+          initSidebar();
+          initUserMenu();
+        }
+      }
+      break;
+  }
+});
