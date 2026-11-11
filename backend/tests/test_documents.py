@@ -44,6 +44,9 @@ startxref
 %%EOF
 """
 
+# Valid TXT content
+VALID_TXT_CONTENT = b"This is a valid plain text document for testing."
+
 # Invalid PDF content (wrong signature)
 INVALID_PDF_CONTENT = b"This is not a PDF file"
 
@@ -73,6 +76,28 @@ class TestDocumentUpload:
         assert data["document_id"].startswith("doc_")
         assert data["original_filename"] == "test.pdf"
         assert data["file_size"] == len(VALID_PDF_CONTENT)
+        assert data["processing_status"] == "uploaded"
+        assert "upload_timestamp" in data
+
+    @pytest.mark.asyncio
+    async def test_admin_can_upload_valid_txt(self, client, test_db):
+        """Test admin can upload a valid TXT file."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("test.txt", BytesIO(VALID_TXT_CONTENT), "text/plain")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "document_id" in data
+        assert data["document_id"].startswith("doc_")
+        assert data["original_filename"] == "test.txt"
+        assert data["file_size"] == len(VALID_TXT_CONTENT)
         assert data["processing_status"] == "uploaded"
         assert "upload_timestamp" in data
 
@@ -125,7 +150,7 @@ class TestDocumentUpload:
         token = create_token(admin_user.id, "admin")
         headers = {"Authorization": f"Bearer {token}"}
 
-        files = {"file": ("test.txt", BytesIO(b"not a pdf"), "text/plain")}
+        files = {"file": ("test.exe", BytesIO(b"not a document"), "application/octet-stream")}
         response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
 
         assert response.status_code == 400
@@ -150,6 +175,63 @@ class TestDocumentUpload:
         data = response.json()
         assert "detail" in data
         assert "mime" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_txt_invalid_mime_type_rejected(self, client, test_db):
+        """Test TXT file with invalid MIME type is rejected (validated as PDF due to MIME type)."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Upload .txt file but claim it's PDF - will fail PDF signature validation
+        files = {"file": ("test.txt", BytesIO(VALID_TXT_CONTENT), "application/pdf")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        # Since MIME type is application/pdf, it's validated as PDF and fails signature check
+        assert "signature" in data["detail"].lower() or "pdf" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_empty_txt_rejected(self, client, test_db):
+        """Test empty TXT file is rejected."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("empty.txt", BytesIO(EMPTY_PDF_CONTENT), "text/plain")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "empty" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_oversized_txt_rejected(self, client, test_db):
+        """Test oversized TXT file is rejected."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Create content larger than 10MB
+        oversized_content = b"x" * (11 * 1024 * 1024)
+        files = {"file": ("large.txt", BytesIO(oversized_content), "text/plain")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 413
+        data = response.json()
+        assert "detail" in data
 
     @pytest.mark.asyncio
     async def test_fake_pdf_signature_rejected(self, client, test_db):

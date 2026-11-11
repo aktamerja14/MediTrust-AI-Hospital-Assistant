@@ -15,8 +15,8 @@ logger = logging.getLogger("meditrust.services.document")
 
 DOCUMENTS_COLLECTION = "documents"
 PDF_SIGNATURE = b"%PDF"
-ALLOWED_MIME_TYPES = {"application/pdf"}
-ALLOWED_EXTENSIONS = {".pdf"}
+ALLOWED_MIME_TYPES = {"application/pdf", "text/plain"}
+ALLOWED_EXTENSIONS = {".pdf", ".txt"}
 
 
 class DocumentServiceError(Exception):
@@ -66,15 +66,17 @@ class DocumentService:
         """Validate file extension."""
         ext = Path(filename).suffix.lower()
         if ext not in ALLOWED_EXTENSIONS:
+            allowed = ", ".join(sorted(ALLOWED_EXTENSIONS))
             raise InvalidFileError(
-                f"Invalid file extension '{ext}'. Only .pdf files are allowed."
+                f"Invalid file extension '{ext}'. Allowed extensions: {allowed}"
             )
 
     def _validate_mime_type(self, content_type: Optional[str]) -> None:
         """Validate MIME type."""
         if not content_type or content_type not in ALLOWED_MIME_TYPES:
+            allowed = ", ".join(sorted(ALLOWED_MIME_TYPES))
             raise InvalidFileError(
-                f"Invalid MIME type '{content_type}'. Only application/pdf is allowed."
+                f"Invalid MIME type '{content_type}'. Allowed types: {allowed}"
             )
 
     def _validate_file_size(self, file_size: int) -> None:
@@ -198,6 +200,11 @@ class DocumentService:
             logger.error("Failed to delete document metadata: %s", exc)
             raise DocumentServiceError("Failed to delete document metadata") from exc
 
+    def _is_pdf_file(self, filename: str, content_type: Optional[str]) -> bool:
+        """Check if file is a PDF based on extension or MIME type."""
+        ext = Path(filename).suffix.lower()
+        return ext == ".pdf" or content_type == "application/pdf"
+
     async def upload_document(
         self,
         file_content: bytes,
@@ -206,7 +213,7 @@ class DocumentService:
         uploaded_by: str,
     ) -> dict:
         """
-        Upload and validate a PDF document.
+        Upload and validate a document (PDF or TXT).
 
         Args:
             file_content: Raw file bytes
@@ -226,8 +233,10 @@ class DocumentService:
         self._validate_file_extension(filename)
         self._validate_mime_type(content_type)
         self._validate_file_size(len(file_content))
-        self._validate_pdf_signature(file_content)
-        self._validate_pdf_structure(file_content)
+
+        if self._is_pdf_file(filename, content_type):
+            self._validate_pdf_signature(file_content)
+            self._validate_pdf_structure(file_content)
 
         document_id = self._generate_document_id()
         storage_filename = self._generate_storage_filename(document_id, filename)
@@ -239,7 +248,7 @@ class DocumentService:
                 document_id=document_id,
                 original_filename=filename,
                 storage_filename=storage_filename,
-                file_type=content_type or "application/pdf",
+                file_type=content_type or ("application/pdf" if self._is_pdf_file(filename, content_type) else "text/plain"),
                 file_size=len(file_content),
                 uploaded_by=uploaded_by,
             )

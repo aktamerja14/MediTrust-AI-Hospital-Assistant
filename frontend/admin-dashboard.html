@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MediTrust Admin Dashboard - System Overview & Statistics">
+  <title>Dashboard | MediTrust Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-dashboard-page">
+
+  <!-- Admin Header -->
+  <header class="admin-header">
+    <div class="admin-header-content">
+      <div class="admin-header-left">
+        <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle Sidebar" aria-expanded="false">
+          <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+        </button>
+        <a href="admin-dashboard.html" class="admin-brand-logo" aria-label="MediTrust Admin Home">
+          <div class="brand-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
+          </div>
+          <div class="brand-text">Medi<span>Trust</span> Admin</div>
+        </a>
+      </div>
+      <div class="admin-header-right">
+        <a href="index.html" class="btn btn-outline btn-sm back-to-site" aria-label="Back to Website">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+          <span>Back to Website</span>
+        </a>
+        <div class="admin-user-menu">
+          <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-label="User Menu" aria-expanded="false" aria-haspopup="true">
+            <div class="user-avatar" id="userAvatar">A</div>
+            <span class="user-name" id="userName">Admin</span>
+            <svg class="chevron" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="user-dropdown" id="userDropdown" role="menu" aria-hidden="true">
+            <div class="dropdown-header">
+              <div class="dropdown-user-info">
+                <div class="dropdown-avatar" id="dropdownAvatar">A</div>
+                <div class="dropdown-user-details">
+                  <span class="dropdown-user-name" id="dropdownUserName">Admin User</span>
+                  <span class="dropdown-user-role" id="dropdownUserRole">Administrator</span>
+                </div>
+              </div>
+            </div>
+            <div class="dropdown-divider"></div>
+            <a href="admin-documents.html" class="dropdown-item" role="menuitem">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+              <span>Documents</span>
+            </a>
+            <a href="chat.html" class="dropdown-item" role="menuitem">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              <span>Open AI Chatbot</span>
+            </a>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item dropdown-item-danger" id="logoutBtn" role="menuitem">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="admin-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="admin-sidebar" id="adminSidebar" aria-label="Admin Navigation">
+      <nav class="admin-nav">
+        <ul class="admin-nav-list" role="list">
+          <li class="admin-nav-item">
+            <a href="admin-dashboard.html" class="admin-nav-link active" data-page="dashboard" aria-current="page">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+              <span>Dashboard</span>
+            </a>
+          </li>
+          <li class="admin-nav-item">
+            <a href="chat.html" class="admin-nav-link" data-page="chatbot">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              <span>AI Chatbot</span>
+            </a>
+          </li>
+          <li class="admin-nav-item">
+            <a href="admin-documents.html" class="admin-nav-link" data-page="documents">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+              <span>Documents</span>
+            </a>
+          </li>
+        </ul>
+
+        <div class="admin-nav-footer">
+          <div class="admin-version">
+            <span class="version-label">Version</span>
+            <span class="version-number" id="appVersion">1.0.0</span>
+          </div>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Sidebar Overlay for Mobile -->
+    <div class="sidebar-overlay" id="sidebarOverlay" aria-hidden="true"></div>
+
+    <!-- Main Content -->
+    <main class="admin-main" role="main">
+      <div class="admin-content">
+        <!-- Page Header -->
+        <header class="page-header">
+          <div class="page-header-content">
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-subtitle">System overview and key metrics</p>
+          </div>
+          <div class="page-header-actions">
+            <button type="button" class="btn btn-outline btn-sm" id="refreshDashboardBtn">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Loading State -->
+        <div class="dashboard-loading" id="dashboardLoading" aria-hidden="true">
+          <div class="loading-spinner-large"></div>
+          <p>Loading dashboard statistics...</p>
+        </div>
+
+        <!-- Error State -->
+        <div class="dashboard-error hidden" id="dashboardError" role="alert">
+          <div class="error-content">
+            <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <h3>Unable to Load Dashboard</h3>
+            <p id="dashboardErrorMessage">Failed to fetch dashboard statistics. Please try again.</p>
+            <button type="button" class="btn btn-primary" id="retryDashboardBtn">Retry</button>
+          </div>
+        </div>
+
+        <!-- Dashboard Stats Grid -->
+        <div class="dashboard-stats-grid hidden" id="dashboardStatsGrid">
+          <!-- Total Users -->
+          <article class="stat-card">
+            <div class="stat-icon stat-icon-primary">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-label">Total Users</span>
+              <span class="stat-value" id="statTotalUsers">—</span>
+            </div>
+          </article>
+
+          <!-- Total Patients -->
+          <article class="stat-card">
+            <div class="stat-icon stat-icon-secondary">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-label">Total Patients</span>
+              <span class="stat-value" id="statTotalPatients">—</span>
+            </div>
+          </article>
+
+          <!-- Total Admins -->
+          <article class="stat-card">
+            <div class="stat-icon stat-icon-warning">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-label">Total Admins</span>
+              <span class="stat-value" id="statTotalAdmins">—</span>
+            </div>
+          </article>
+
+          <!-- Active Users -->
+          <article class="stat-card">
+            <div class="stat-icon stat-icon-success">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-label">Active Users</span>
+              <span class="stat-value" id="statActiveUsers">—</span>
+            </div>
+          </article>
+
+          <!-- Inactive Users -->
+          <article class="stat-card">
+            <div class="stat-icon stat-icon-muted">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-label">Inactive Users</span>
+              <span class="stat-value" id="statInactiveUsers">—</span>
+            </div>
+          </article>
+
+          <!-- Last Updated -->
+          <article class="stat-card stat-card-last-updated">
+            <div class="stat-icon stat-icon-info">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <div class="stat-content">
+              <span class="stat-label">Last Updated</span>
+              <span class="stat-value" id="statLastUpdated">—</span>
+            </div>
+          </article>
+        </div>
+
+        <!-- Quick Actions -->
+        <section class="quick-actions" aria-labelledby="quickActionsTitle">
+          <h2 id="quickActionsTitle" class="section-title-sm">Quick Actions</h2>
+          <div class="quick-actions-grid">
+            <a href="admin-documents.html" class="quick-action-card">
+              <div class="quick-action-icon quick-action-primary">
+                <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+              </div>
+              <div class="quick-action-content">
+                <h3>Manage Documents</h3>
+                <p>Upload, view, and manage knowledge base documents</p>
+              </div>
+              <svg class="quick-action-arrow" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </a>
+            <button type="button" class="quick-action-card" id="refreshStatsAction">
+              <div class="quick-action-icon quick-action-secondary">
+                <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+              </div>
+              <div class="quick-action-content">
+                <h3>Refresh Statistics</h3>
+                <p>Update dashboard with latest system metrics</p>
+              </div>
+              <svg class="quick-action-arrow" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- Recent Activity (Placeholder) -->
+        <section class="recent-activity" aria-labelledby="recentActivityTitle">
+          <div class="section-header-row">
+            <h2 id="recentActivityTitle" class="section-title-sm">Recent Activity</h2>
+            <a href="admin-documents.html" class="view-all-link">View all activity</a>
+          </div>
+          <div class="activity-list" id="activityList">
+            <div class="activity-empty">
+              <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+              <p>No recent activity to display</p>
+              <span class="activity-hint">Document uploads and deletions will appear here</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

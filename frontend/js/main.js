@@ -18,9 +18,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initDepartmentDoctorSync();
   initAppointmentBooking();
   initContactForm();
-  initAuthModals();
   initDateConstraints();
   initPlaceholderLinks();
+  // Auth modals are now initialized by auth.js initMainWebsiteAuth()
 });
 
 /* ==========================================================================
@@ -466,61 +466,9 @@ function initAuthModals() {
     }
   });
 
-  // Handle Demo Login Submission
-  const loginForm = document.getElementById('loginForm');
-  if (loginForm) {
-    loginForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const email = document.getElementById('loginEmail');
-      const pass = document.getElementById('loginPassword');
-
-      if (!validateEmail(email.value.trim())) {
-        markInvalid(email, 'Please enter a valid email');
-        return;
-      }
-      if (!pass.value.trim() || pass.value.length < 6) {
-        markInvalid(pass, 'Password must be at least 6 characters');
-        return;
-      }
-
-      closeAllModals();
-      showToast(`Welcome! (Demo mode: Phase 2 will link authentication)`, 'info');
-      loginForm.reset();
-    });
-  }
-
-  // Handle Demo Sign Up Submission
-  const signupForm = document.getElementById('signupForm');
-  if (signupForm) {
-    signupForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const name = document.getElementById('signupName');
-      const email = document.getElementById('signupEmail');
-      const pass = document.getElementById('signupPassword');
-      const confirm = document.getElementById('signupConfirmPassword');
-
-      if (!name.value.trim()) {
-        markInvalid(name, 'Please enter your full name');
-        return;
-      }
-      if (!validateEmail(email.value.trim())) {
-        markInvalid(email, 'Please enter a valid email');
-        return;
-      }
-      if (pass.value.length < 6) {
-        markInvalid(pass, 'Password must be at least 6 characters');
-        return;
-      }
-      if (pass.value !== confirm.value) {
-        markInvalid(confirm, 'Passwords do not match');
-        return;
-      }
-
-      closeAllModals();
-      showToast('Registration successful! (Demo mode: Phase 2 backend will persist users)', 'success');
-      signupForm.reset();
-    });
-  }
+  // Note: Login/Signup form handlers are now in auth.js for real API integration.
+  // The modal forms on index.html use the same IDs but are handled separately.
+  // If modal forms exist on this page, they will be handled by auth.js when loaded.
 }
 
 /* ==========================================================================
@@ -617,4 +565,11 @@ function initPlaceholderLinks() {
     });
   });
 }
+
+// Export functions for auth.js to use
+window.initAuthModals = initAuthModals;
+window.initMobileMenu = initMobileMenu;
+window.openModal = openModal;
+window.closeAllModals = closeAllModals;
+window.showToast = showToast;
 

@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.api.routes import health
 from app.api.routes.auth import router as auth_router
 from app.api.routes.admin import admin_router, documents_router
+from app.api.routes.chat import chat_router
 from app.database.connection import lifespan
 
 
@@ -35,6 +36,7 @@ def create_application() -> FastAPI:
     app.include_router(auth_router, prefix=settings.API_V1_STR)
     app.include_router(admin_router, prefix=settings.API_V1_STR)
     app.include_router(documents_router, prefix=settings.API_V1_STR)
+    app.include_router(chat_router, prefix=settings.API_V1_STR)
 
     @app.get("/", tags=["Root"])
     async def root() -> dict[str, str]:

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="MediTrust Admin Documents - Knowledge Base Management">
+  <title>Documents | MediTrust Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-documents-page">
+
+  <!-- Admin Header -->
+  <header class="admin-header">
+    <div class="admin-header-content">
+      <div class="admin-header-left">
+        <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle Sidebar" aria-expanded="false">
+          <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+        </button>
+        <a href="admin-dashboard.html" class="admin-brand-logo" aria-label="MediTrust Admin Home">
+          <div class="brand-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
+          </div>
+          <div class="brand-text">Medi<span>Trust</span> Admin</div>
+        </a>
+      </div>
+      <div class="admin-header-right">
+        <a href="index.html" class="btn btn-outline btn-sm back-to-site" aria-label="Back to Website">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+          <span>Back to Website</span>
+        </a>
+        <div class="admin-user-menu">
+          <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-label="User Menu" aria-expanded="false" aria-haspopup="true">
+            <div class="user-avatar" id="userAvatar">A</div>
+            <span class="user-name" id="userName">Admin</span>
+            <svg class="chevron" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div class="user-dropdown" id="userDropdown" role="menu" aria-hidden="true">
+            <div class="dropdown-header">
+              <div class="dropdown-user-info">
+                <div class="dropdown-avatar" id="dropdownAvatar">A</div>
+                <div class="dropdown-user-details">
+                  <span class="dropdown-user-name" id="dropdownUserName">Admin User</span>
+                  <span class="dropdown-user-role" id="dropdownUserRole">Administrator</span>
+                </div>
+              </div>
+            </div>
+            <div class="dropdown-divider"></div>
+            <a href="admin-dashboard.html" class="dropdown-item" role="menuitem">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+              <span>Dashboard</span>
+            </a>
+            <a href="chat.html" class="dropdown-item" role="menuitem">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+              <span>Open AI Chatbot</span>
+            </a>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item dropdown-item-danger" id="logoutBtn" role="menuitem">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="admin-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="admin-sidebar" id="adminSidebar" aria-label="Admin Navigation">
+      <nav class="admin-nav">
+        <ul class="admin-nav-list" role="list">
+          <li class="admin-nav-item">
+            <a href="admin-dashboard.html" class="admin-nav-link" data-page="dashboard">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+              <span>Dashboard</span>
+            </a>
+          </li>
+          <li class="admin-nav-item">
+            <a href="admin-documents.html" class="admin-nav-link active" data-page="documents" aria-current="page">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+              <span>Documents</span>
+            </a>
+          </li>
+        </ul>
+
+        <div class="admin-nav-footer">
+          <div class="admin-version">
+            <span class="version-label">Version</span>
+            <span class="version-number" id="appVersion">1.0.0</span>
+          </div>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Sidebar Overlay for Mobile -->
+    <div class="sidebar-overlay" id="sidebarOverlay" aria-hidden="true"></div>
+
+    <!-- Main Content -->
+    <main class="admin-main" role="main">
+      <div class="admin-content">
+        <!-- Page Header -->
+        <header class="page-header">
+          <div class="page-header-content">
+            <h1 class="page-title">Documents</h1>
+            <p class="page-subtitle">Manage knowledge base documents and uploads</p>
+          </div>
+          <div class="page-header-actions">
+            <button type="button" class="btn btn-primary" id="openUploadModalBtn">
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              <span>Upload Document</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Upload Modal -->
+        <div class="modal-overlay" id="uploadModal" role="dialog" aria-modal="true" aria-labelledby="uploadModalTitle" aria-hidden="true">
+          <div class="modal-box modal-box-lg">
+            <button type="button" class="modal-close-btn" id="closeUploadModal" aria-label="Close upload modal">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            <header class="modal-header">
+              <h3 id="uploadModalTitle">Upload Document</h3>
+              <p>Select a PDF or TXT file to upload to the knowledge base</p>
+            </header>
+
+            <form id="uploadForm" novalidate>
+              <!-- Drop Zone -->
+              <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Drop zone for document upload. Click or drag and drop a PDF or TXT file.">
+                <input type="file" id="fileInput" accept=".pdf,.txt" hidden>
+                <div class="drop-zone-content" id="dropZoneContent">
+                  <svg class="drop-zone-icon" width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                  <p class="drop-zone-text">Drag and drop a PDF or TXT file here, or click to browse</p>
+                  <p class="drop-zone-hint">Maximum file size: 10 MB · PDF and TXT files only</p>
+                </div>
+                <div class="drop-zone-preview hidden" id="dropZonePreview">
+                  <div class="preview-file-info">
+                    <svg class="preview-file-icon" width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    <div class="preview-file-details">
+                      <span class="preview-file-name" id="previewFileName"></span>
+                      <span class="preview-file-size" id="previewFileSize"></span>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-outline btn-sm" id="removeFileBtn">Remove</button>
+                </div>
+              </div>
+
+              <div class="error-feedback" id="uploadError" role="alert" hidden></div>
+
+              <!-- Upload Progress -->
+              <div class="upload-progress hidden" id="uploadProgress" role="status" aria-live="polite">
+                <div class="progress-bar">
+                  <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-info">
+                  <span class="progress-text" id="progressText">Uploading...</span>
+                  <span class="progress-percent" id="progressPercent">0%</span>
+                </div>
+              </div>
+
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="cancelUploadBtn">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="submitUploadBtn" disabled>
+                  <span class="btn-text">Upload Document</span>
+                  <span class="btn-loading hidden">
+                    <svg class="spinner" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    Uploading...
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Delete Confirmation Modal -->
+        <div class="modal-overlay" id="deleteModal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" aria-hidden="true">
+          <div class="modal-box">
+            <header class="modal-header">
+              <h3 id="deleteModalTitle">Delete Document</h3>
+              <p>This action cannot be undone</p>
+            </header>
+            <div class="modal-body">
+              <p>Are you sure you want to delete <strong id="deleteDocName"></strong>?</p>
+              <p class="text-muted text-sm">This will permanently remove the document and its file from storage.</p>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline" id="cancelDeleteBtn">Cancel</button>
+              <button type="button" class="btn btn-emergency" id="confirmDeleteBtn">
+                <span class="btn-text">Delete</span>
+                <span class="btn-loading hidden">
+                  <svg class="spinner" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                  Deleting...
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Loading State -->
+        <div class="documents-loading" id="documentsLoading" aria-hidden="true">
+          <div class="loading-spinner-large"></div>
+          <p>Loading documents...</p>
+        </div>
+
+        <!-- Error State -->
+        <div class="documents-error hidden" id="documentsError" role="alert">
+          <div class="error-content">
+            <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <h3>Unable to Load Documents</h3>
+            <p id="documentsErrorMessage">Failed to fetch documents. Please try again.</p>
+            <button type="button" class="btn btn-primary" id="retryDocumentsBtn">Retry</button>
+          </div>
+        </div>
+
+        <!-- Documents Table -->
+        <div class="documents-table-container hidden" id="documentsTableContainer">
+          <div class="table-responsive">
+            <table class="admin-table" id="documentsTable" role="grid">
+              <thead>
+                <tr>
+                  <th scope="col">Document</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">Upload Date</th>
+                  <th scope="col">Status</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="documentsTableBody">
+                <!-- Rows populated by JavaScript -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <nav class="pagination" id="pagination" aria-label="Documents pagination" hidden>
+            <button type="button" class="pagination-btn" id="prevPageBtn" aria-label="Previous page" disabled>
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+            </button>
+            <div class="pagination-pages" id="paginationPages" role="group" aria-label="Page numbers"></div>
+            <button type="button" class="pagination-btn" id="nextPageBtn" aria-label="Next page" disabled>
+              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </button>
+            <div class="pagination-info" id="paginationInfo"></div>
+          </nav>
+        </div>
+
+        <!-- Empty State -->
+        <div class="documents-empty hidden" id="documentsEmpty">
+          <svg width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+          <h3>No Documents Yet</h3>
+          <p>Upload your first PDF or TXT document to build the knowledge base.</p>
+          <button type="button" class="btn btn-primary" id="emptyUploadBtn">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+            <span>Upload Document</span>
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

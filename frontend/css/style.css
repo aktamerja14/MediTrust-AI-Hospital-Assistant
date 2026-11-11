@@ -276,6 +276,25 @@ button {
 }
 
 /* ==========================================================================
+   Utility Classes
+   ========================================================================== */
+.hidden {
+  display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ==========================================================================
    Top Information & Emergency Bar
    ========================================================================== */
 .top-bar {
@@ -1839,8 +1858,193 @@ button {
 }
 
 /* ==========================================================================
+   User Menu Dropdown (Main Website)
+   ========================================================================== */
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-shrink: 0;
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem 0.375rem 0.375rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-alt);
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+}
+
+.user-menu-trigger:hover {
+  background: var(--primary-subtle);
+  border-color: var(--primary-light);
+}
+
+.user-menu-trigger .user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.user-menu-trigger .user-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-dark);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-trigger .chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+  width: 16px;
+  height: 16px;
+}
+
+.user-menu-trigger[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+.user-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 240px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: all var(--transition-base);
+  z-index: 100;
+}
+
+.user-dropdown[aria-hidden="false"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.dropdown-header {
+  padding: 1rem;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dropdown-user-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dropdown-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.dropdown-user-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dropdown-user-name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-user-role {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0.5rem 0;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-body);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dropdown-item:hover {
+  background: var(--bg-alt);
+  color: var(--primary);
+}
+
+.dropdown-item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.dropdown-item:hover svg {
+  color: var(--primary);
+}
+
+.dropdown-item-danger {
+  color: var(--emergency);
+}
+
+.dropdown-item-danger:hover {
+  background: var(--emergency-light);
+  color: var(--emergency);
+}
+
+.dropdown-item-danger svg {
+  color: var(--emergency);
+}
+
+/* ==========================================================================
    Responsive Breakpoints
-   Hierarchical: 1024px -> 860px -> 768px -> 600px -> 430px -> 390px -> 375px -> 360px -> 320px
    ========================================================================== */
 
 /* 1. Tablet Landscape (1024px) */
@@ -2186,10 +2390,180 @@ button {
     gap: 0.25rem;
   }
 
-  .nav-actions .btn-sm {
+.nav-actions .btn-sm {
     padding: 0.25rem 0.4rem;
     font-size: 0.7rem;
   }
+}
+
+/* ==========================================================================
+   Floating Chatbot Widget
+   ========================================================================== */
+.chatbot-widget {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 1000;
+  font-family: var(--font-sans);
+}
+
+.chatbot-toggle {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-xl), var(--shadow-blue);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  color: #fff;
+}
+
+.chatbot-toggle:hover {
+  transform: scale(1.05);
+  box-shadow: var(--shadow-xl), 0 12px 30px -6px rgba(2, 132, 199, 0.4);
+}
+
+.chatbot-toggle:focus-visible {
+  outline: 3px solid var(--primary-light);
+  outline-offset: 3px;
+}
+
+.chatbot-toggle .chatbot-icon-close {
+  display: none;
+}
+
+.chatbot-toggle[aria-expanded="true"] .chatbot-icon-open {
+  display: none;
+}
+
+.chatbot-toggle[aria-expanded="true"] .chatbot-icon-close {
+  display: block;
+}
+
+.chatbot-popup {
+  position: absolute;
+  bottom: 75px;
+  right: 0;
+  width: 320px;
+  max-width: calc(100vw - 3rem);
+  background: var(--bg-card);
+  border-radius: 1rem;
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  animation: chatbotPopupIn 0.2s ease-out;
+  transform-origin: bottom right;
+}
+
+@keyframes chatbotPopupIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.chatbot-popup.hidden {
+  display: none;
+}
+
+.chatbot-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #fff;
+}
+
+.chatbot-popup-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.chatbot-popup-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast);
+}
+
+.chatbot-popup-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.chatbot-popup-close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.chatbot-popup-body {
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.chatbot-popup-body p {
+  margin: 0 0 1rem;
+  color: var(--text-body);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.chatbot-popup-actions {
+  margin-bottom: 0.75rem;
+}
+
+.chatbot-popup-actions .btn {
+  width: 100%;
+}
+
+.chatbot-popup-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Mobile adjustments */
+@media (max-width: 480px) {
+  .chatbot-widget {
+    bottom: 1rem;
+    right: 1rem;
+  }
+
+  .chatbot-toggle {
+    width: 56px;
+    height: 56px;
+  }
+
+  .chatbot-popup {
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+    right: -0.5rem;
+    bottom: 70px;
+  }
+}
+
+/* Ensure widget doesn't cover footer or important content */
+@media (max-width: 768px) {
+  .chatbot-widget {
+    bottom: 5.5rem; /* Above mobile nav if present */
+  }
+}
 
   .menu-toggle {
     width: 30px;
