@@ -1,6 +1,6 @@
 """AI Chatbot API routes - accessible by both patients and admins."""
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,6 +11,7 @@ from app.database.connection import get_db
 from app.api.dependencies import get_auth_service, get_current_active_user, require_any_role
 from app.services.auth import AuthService
 from app.schemas.auth import UserResponse
+from app.ai.rag.chain import RAGChain, RAGChainError
 
 logger = logging.getLogger("meditrust.api.chat")
 
@@ -24,6 +25,15 @@ class ChatMessage(BaseModel):
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message timestamp")
+
+
+class SourceReference(BaseModel):
+    """Source document reference in RAG response."""
+    document_id: str
+    source: str
+    page: str
+    score: float
+    content_preview: str
 
 
 class ChatConversation(BaseModel):
@@ -47,6 +57,9 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(..., description="Conversation ID")
     user_message: ChatMessage = Field(..., description="Echo of user message")
     assistant_message: ChatMessage = Field(..., description="AI assistant response")
+    sources: List[SourceReference] = Field(default_factory=list, description="Source document references")
+    has_context: bool = Field(default=False, description="Whether relevant context was found")
+    model: str = Field(default="", description="LLM model used")
 
 
 class ConversationListItem(BaseModel):
@@ -62,6 +75,18 @@ class ConversationListResponse(BaseModel):
     conversations: list[ConversationListItem]
 
 
+# Singleton RAG chain
+_rag_chain: RAGChain = None
+
+
+def get_rag_chain() -> RAGChain:
+    """Get or create RAG chain singleton."""
+    global _rag_chain
+    if _rag_chain is None:
+        _rag_chain = RAGChain()
+    return _rag_chain
+
+
 @router.post(
     "/message",
     response_model=ChatResponse,
@@ -71,6 +96,7 @@ class ConversationListResponse(BaseModel):
         401: {"description": "Not authenticated"},
         403: {"description": "Inactive user account"},
         422: {"description": "Validation error"},
+        500: {"description": "AI service error"},
     },
     dependencies=[Depends(require_any_role)],
 )
@@ -80,7 +106,7 @@ async def send_message(
     db: Annotated[AsyncDatabase, Depends(get_db)],
 ) -> ChatResponse:
     """
-    Send a message to the AI chatbot and receive a response.
+    Send a message to the AI chatbot and receive a RAG-grounded response.
 
     Both patients and admins can use this endpoint.
     Creates a new conversation if conversation_id is not provided.
@@ -121,9 +147,42 @@ async def send_message(
     user_message = ChatMessage(role="user", content=request.message)
     conversation.messages.append(user_message)
 
-    # Generate AI response (placeholder - replace with actual AI integration)
-    assistant_response = generate_ai_response(request.message, current_user.role)
-    assistant_message = ChatMessage(role="assistant", content=assistant_response)
+    # Prepare conversation history for RAG (last 6 messages excluding current)
+    history = [msg.model_dump() for msg in conversation.messages[:-1]][-6:]
+
+    # Generate AI response using RAG chain
+    try:
+        rag_chain = get_rag_chain()
+        rag_response = rag_chain.generate(
+            query=request.message,
+            conversation_history=history,
+        )
+        assistant_content = rag_response.answer
+        sources = [SourceReference(**s) for s in rag_response.sources]
+        has_context = rag_response.has_context
+        model = rag_response.model
+    except RAGChainError as e:
+        logger.error("RAG chain error: %s", e)
+        # Fallback response on RAG failure
+        assistant_content = (
+            "I apologize, but I'm experiencing technical difficulties accessing the "
+            "knowledge base. Please try again in a moment, or contact support if the "
+            "issue persists.\n\n"
+            "---\n"
+            "**Disclaimer:** This AI assistant provides general health information only. "
+            "For medical emergencies, call emergency services immediately."
+        )
+        sources = []
+        has_context = False
+        model = ""
+    except Exception as e:
+        logger.exception("Unexpected error in chat: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate response"
+        )
+
+    assistant_message = ChatMessage(role="assistant", content=assistant_content)
     conversation.messages.append(assistant_message)
 
     # Update timestamp
@@ -150,12 +209,16 @@ async def send_message(
         result = await db[CHAT_HISTORY_COLLECTION].insert_one(conversation_doc)
         conversation.id = str(result.inserted_id)
 
-    logger.info("Chat message processed for user: %s (role: %s)", current_user.email, current_user.role)
+    logger.info("Chat message processed for user: %s (role: %s, has_context: %s)",
+                current_user.email, current_user.role, has_context)
 
     return ChatResponse(
         conversation_id=conversation.id,
         user_message=user_message,
         assistant_message=assistant_message,
+        sources=sources,
+        has_context=has_context,
+        model=model,
     )
 
 
@@ -304,57 +367,3 @@ async def delete_conversation(
     logger.info("Conversation deleted: %s by user: %s", conversation_id, current_user.email)
 
     return {"message": "Conversation deleted successfully", "conversation_id": conversation_id}
-
-
-def generate_ai_response(user_message: str, user_role: str) -> str:
-    """
-    Generate AI response based on user message and role.
-
-    This is a placeholder implementation. In production, this would
-    integrate with an actual AI service (e.g., OpenAI, Anthropic, local LLM).
-    """
-    # Simple keyword-based responses for demo
-    message_lower = user_message.lower()
-
-    # Medical disclaimer for all responses
-    disclaimer = "\n\n---\n*Disclaimer: This AI assistant provides general health information only. For medical emergencies, call emergency services immediately. For personalized medical advice, consult with a healthcare professional.*"
-
-    if any(keyword in message_lower for keyword in ["emergency", "urgent", "help", "chest pain", "difficulty breathing", "unconscious"]):
-        return ("This sounds like it could be a medical emergency. Please call emergency services (911 in the US) "
-                "or go to the nearest emergency room immediately. Do not wait for an AI response.") + disclaimer
-
-    if any(keyword in message_lower for keyword in ["appointment", "book", "schedule", "doctor", "specialist"]):
-        return ("I can help you understand how to book appointments at MediTrust. You can schedule consultations "
-                "through our website's appointment system or by calling our front desk. Would you like information "
-                "about a specific department or specialist?") + disclaimer
-
-    if any(keyword in message_lower for keyword in ["lab", "result", "test", "blood", "report"]):
-        return ("I can provide general information about lab tests and what typical ranges mean. However, "
-                "lab results should always be interpreted by your healthcare provider who knows your full "
-                "medical history. Would you like general information about a specific test?") + disclaimer
-
-    if any(keyword in message_lower for keyword in ["medication", "prescription", "drug", "medicine", "dosage"]):
-        return ("I can provide general information about medications, but I cannot provide specific dosage "
-                "recommendations or prescription advice. Always follow your doctor's instructions and consult "
-                "with a pharmacist for medication questions.") + disclaimer
-
-    if any(keyword in message_lower for keyword in ["symptom", "pain", "fever", "headache", "nausea", "cough"]):
-        return ("I can provide general information about symptoms, but I cannot diagnose medical conditions. "
-                "If you're experiencing concerning symptoms, please consult with a healthcare professional for "
-                "proper evaluation and treatment.") + disclaimer
-
-    if user_role == "admin" and any(keyword in message_lower for keyword in ["admin", "dashboard", "statistics", "user", "document"]):
-        return ("As an administrator, you have access to the admin dashboard where you can view system "
-                "statistics, manage documents, and monitor user activity. Is there something specific about "
-                "the admin panel you'd like help with?") + disclaimer
-
-    # Default response
-    responses = [
-        "I understand you're asking about that. As an AI health assistant, I can provide general information, but please consult with a healthcare professional for personalized medical advice.",
-        "That's a great question. For specific health concerns, I recommend scheduling an appointment with one of our specialists at MediTrust. Would you like me to help you find the right department?",
-        "I can provide general health information on that topic. However, for accurate diagnosis and treatment planning, please consult with a qualified healthcare provider.",
-        "Thank you for your question. Remember that this AI assistant provides informational support only and is not a substitute for professional medical consultation."
-    ]
-
-    import random
-    return random.choice(responses) + disclaimer

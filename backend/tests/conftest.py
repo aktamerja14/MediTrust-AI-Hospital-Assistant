@@ -22,6 +22,9 @@ if not mongodb_uri:
 os.environ["ENVIRONMENT"] = "testing"
 os.environ["DATABASE_NAME"] = "meditrust_test"
 os.environ["MONGODB_URL"] = mongodb_uri
+os.environ["LLM_PROVIDER"] = "mock"
+os.environ["LLM_MODEL"] = "mock-model"
+os.environ["LLM_API_KEY"] = "mock-key"
 
 from app.core.config import settings
 from app.database.connection import DatabaseManager, get_db

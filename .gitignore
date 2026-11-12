@@ -46,3 +46,6 @@ Thumbs.db
 
 # Uploaded hospital documents - private storage
 backend/data/
+backend/test_download/
+
+\ No newline at end of file

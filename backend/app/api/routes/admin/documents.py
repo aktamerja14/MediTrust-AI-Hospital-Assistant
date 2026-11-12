@@ -22,6 +22,7 @@ from app.services.document_service import (
     InvalidFileError,
     StorageError,
 )
+from app.services.rag_ingestion import RAGIngestionService, RAGIngestionError
 
 logger = logging.getLogger("meditrust.api.admin.documents")
 
@@ -33,6 +34,15 @@ async def get_document_service(
 ) -> DocumentService:
     """Get DocumentService instance with database connection."""
     return DocumentService(db)
+
+
+async def get_rag_ingestion_service(
+    db: Annotated[AsyncDatabase, Depends(get_db)],
+) -> RAGIngestionService:
+    """Get RAGIngestionService instance with database connection."""
+    service = RAGIngestionService(db)
+    await service.create_indexes()
+    return service
 
 
 @router.post(
@@ -157,6 +167,140 @@ async def list_documents(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve documents")
 
 
+@router.post(
+    "/{document_id}/ingest",
+    response_model=dict,
+    summary="Trigger RAG ingestion for a document",
+    responses={
+        200: {"description": "Ingestion completed"},
+        202: {"description": "Ingestion started"},
+        401: {"model": DocumentErrorResponse, "description": "Not authenticated"},
+        403: {"model": DocumentErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": DocumentErrorResponse, "description": "Document not found"},
+        500: {"model": DocumentErrorResponse, "description": "Ingestion failed"},
+    },
+)
+async def ingest_document(
+    document_id: str,
+    ingestion_service: Annotated[RAGIngestionService, Depends(get_rag_ingestion_service)],
+    current_user: Annotated[UserResponse, Depends(get_current_active_user)],
+    _admin: Annotated[None, Depends(require_admin)],
+) -> dict:
+    """
+    Trigger RAG ingestion for an uploaded document.
+
+    - Only admin users can trigger ingestion
+    - Processes document: loads, splits, embeds, stores in vector database
+    - Returns ingestion result with chunk count and status
+    """
+    try:
+        result = await ingestion_service.ingest_document(document_id)
+        if result.status == "completed":
+            return {
+                "message": "Document ingested successfully",
+                "document_id": result.document_id,
+                "chunks_created": result.chunks_created,
+                "status": result.status,
+            }
+        elif result.status == "failed":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result.error or "Ingestion failed"
+            )
+        else:
+            return {
+                "message": "Ingestion completed",
+                "document_id": result.document_id,
+                "chunks_created": result.chunks_created,
+                "status": result.status,
+            }
+    except RAGIngestionError as exc:
+        logger.error("Ingestion error for document %s: %s", document_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    except DocumentNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    except Exception as exc:
+        logger.exception("Unexpected error during ingestion: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+
+@router.get(
+    "/{document_id}/ingestion-status",
+    response_model=dict,
+    summary="Get RAG ingestion status for a document",
+    responses={
+        200: {"description": "Ingestion status retrieved"},
+        401: {"model": DocumentErrorResponse, "description": "Not authenticated"},
+        403: {"model": DocumentErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": DocumentErrorResponse, "description": "Document not found"},
+    },
+)
+async def get_ingestion_status(
+    document_id: str,
+    ingestion_service: Annotated[RAGIngestionService, Depends(get_rag_ingestion_service)],
+    current_user: Annotated[UserResponse, Depends(get_current_active_user)],
+    _admin: Annotated[None, Depends(require_admin)],
+) -> dict:
+    """
+    Get RAG ingestion status for a document.
+
+    - Only admin users can check ingestion status
+    - Returns processing status, chunk count, and any error
+    """
+    try:
+        status_info = await ingestion_service.get_ingestion_status(document_id)
+        if status_info is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        return status_info
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error getting ingestion status: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve status")
+
+
+@router.post(
+    "/{document_id}/reingest",
+    response_model=dict,
+    summary="Re-ingest a document (replace existing chunks)",
+    responses={
+        200: {"description": "Re-ingestion completed"},
+        401: {"model": DocumentErrorResponse, "description": "Not authenticated"},
+        403: {"model": DocumentErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": DocumentErrorResponse, "description": "Document not found"},
+        500: {"model": DocumentErrorResponse, "description": "Re-ingestion failed"},
+    },
+)
+async def reingest_document(
+    document_id: str,
+    ingestion_service: Annotated[RAGIngestionService, Depends(get_rag_ingestion_service)],
+    current_user: Annotated[UserResponse, Depends(get_current_active_user)],
+    _admin: Annotated[None, Depends(require_admin)],
+) -> dict:
+    """
+    Re-ingest a document (delete old chunks, create new ones).
+
+    - Only admin users can trigger re-ingestion
+    - Useful after changing embedding model or chunk settings
+    """
+    try:
+        result = await ingestion_service.reingest_document(document_id)
+        return {
+            "message": "Document re-ingested successfully",
+            "document_id": result.document_id,
+            "chunks_created": result.chunks_created,
+            "status": result.status,
+        }
+    except RAGIngestionError as exc:
+        logger.error("Re-ingestion error for document %s: %s", document_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    except DocumentNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    except Exception as exc:
+        logger.exception("Unexpected error during re-ingestion: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+
+
 @router.delete(
     "/{document_id}",
     response_model=DocumentDeleteResponse,
@@ -171,6 +315,7 @@ async def list_documents(
 async def delete_document(
     document_id: str,
     document_service: Annotated[DocumentService, Depends(get_document_service)],
+    ingestion_service: Annotated[RAGIngestionService, Depends(get_rag_ingestion_service)],
     current_user: Annotated[UserResponse, Depends(get_current_active_user)],
     _admin: Annotated[None, Depends(require_admin)],
 ) -> DocumentDeleteResponse:
@@ -180,6 +325,7 @@ async def delete_document(
     - Only admin users can delete documents
     - Validates document ID format
     - Removes both the stored PDF file and MongoDB metadata
+    - Also removes RAG chunks from vector store
     - Handles missing files gracefully
     - Prevents path traversal attacks
 
@@ -187,7 +333,12 @@ async def delete_document(
         Deletion confirmation with document ID
     """
     try:
+        # Delete RAG chunks first
+        await ingestion_service.delete_document_chunks(document_id)
+
+        # Delete document metadata and file
         await document_service.delete_document(document_id)
+
         logger.info("Document deleted by admin %s: %s", current_user.id, document_id)
         return DocumentDeleteResponse(
             message="Document deleted successfully",
