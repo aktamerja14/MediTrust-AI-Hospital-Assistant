@@ -1,0 +1,24 @@
+Query: What are the visiting hours of MediTrust Hospital?
+Answer: The visiting hours are **9 AM to 6 PM**【Clinical Guidelines.txt, Page/Chunk 0】.
+
+**Disclaimer:** This information is provided for general educational purposes only and does not replace professional medical advice. Always consult a qualified healthcare provider for specific guidance.
+
+---
+**Disclaime
+Has context: True
+Sources: 1
+---
+Query: What is normal blood pressure?
+Answer: Normal adult blood pressure is generally considered to be **below 120/80 mmHg**【Source 1: Clinical Guidelines.txt, Page/Chunk 0】.
+
+**Medical disclaimer:** This information is provided for educational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment. Alwa
+Has context: True
+Sources: 1
+---
+Query: What is the parking capacity of MediTrust Hospital?
+Answer: I don't have enough information in the provided documents to answer this question.
+
+**Disclaimer:** This information is for general informational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment. Always consult a qualified healthcare professional for spe
+Has context: True
+Sources: 1
+---

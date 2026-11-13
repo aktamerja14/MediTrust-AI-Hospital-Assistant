@@ -1,0 +1,8 @@
+Answer: I don't have enough information in the provided documents to answer this question.
+
+**Disclaimer:** This response is for informational purposes only and does not constitute medical or professional advice. Always consult qualified professionals for specific concerns.
+
+---
+**Disclaimer:** This AI assistant provides general health information only. It is not a substitute for professional medical advice, diagnosis, or treatment. For medical emergencies, call emergency services immediately. For personalized medical advice, consult with a qualified healthcare professional.
+Has context: True
+Model: openai/gpt-oss-120b

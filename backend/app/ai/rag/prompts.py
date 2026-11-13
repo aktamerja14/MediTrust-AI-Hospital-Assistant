@@ -43,9 +43,8 @@ def build_rag_prompt(
         "to answer this question.\"\n"
         "3. NEVER invent medical facts, diagnoses, treatments, or citations.\n"
         "4. Always cite sources using [Document Name, Page/Chunk X] format.\n"
-        "5. Include the medical disclaimer in your response.\n"
-        "6. Be concise but thorough.\n"
-        "7. Do not claim to be a doctor or provide medical diagnoses."
+        "5. Be concise but thorough.\n"
+        "6. Do not claim to be a doctor or provide medical diagnoses."
     )
 
     # Build context from retrieved chunks

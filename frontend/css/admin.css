@@ -1522,6 +1522,93 @@
 }
 
 /* ==========================================================================
+   Ingest Progress Modal
+   ========================================================================== */
+.ingest-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-alt);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-base);
+}
+
+.progress-step .step-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--text-light);
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.progress-step .step-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-body);
+  flex: 1;
+  transition: color var(--transition-fast);
+}
+
+/* Active step */
+.progress-step.active {
+  border-color: var(--primary);
+  background: var(--primary-subtle);
+}
+
+.progress-step.active .step-icon {
+  color: var(--primary);
+}
+
+.progress-step.active .step-label {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Completed step */
+.progress-step.completed {
+  border-color: var(--success);
+  background: var(--success-light);
+}
+
+.progress-step.completed .step-icon {
+  color: var(--success);
+}
+
+.progress-step.completed .step-label {
+  color: var(--success);
+}
+
+/* Error step */
+.progress-step.error {
+  border-color: var(--emergency);
+  background: var(--emergency-light);
+}
+
+.progress-step.error .step-icon {
+  color: var(--emergency);
+}
+
+.progress-step.error .step-label {
+  color: var(--emergency);
+}
+
+/* Action Buttons Container */
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ==========================================================================
    Responsive Breakpoints
    ========================================================================== */
 

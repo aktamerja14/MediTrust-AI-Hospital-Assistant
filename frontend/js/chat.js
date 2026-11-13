@@ -4,18 +4,65 @@
  * Backend-integrated version using FastAPI + MongoDB
  */
 
-const API_BASE = 'http://127.0.0.1:8000/api/v1';
-
+// API_BASE is defined in auth.js (loaded first)
 const ChatApp = {
   currentConversationId: null,
   conversations: [],
   isLoading: false,
+  currentUser: null,
 
   init() {
+    console.log('[ChatApp] init() called');
     this.bindEvents();
-    this.loadConversations();
-    this.setupWelcomeSuggestions();
-    this.updateUserDisplay();
+    this.initUserMenu();
+    this.verifyUserAndLoad();
+  },
+
+  async verifyUserAndLoad() {
+    console.log('[ChatApp] verifyUserAndLoad called');
+    try {
+      const userData = await this.verifyTokenAndGetUser();
+      console.log('[ChatApp] verifyTokenAndGetUser result:', userData);
+      if (userData && (userData.role === 'patient' || userData.role === 'admin')) {
+        this.currentUser = userData;
+        this.updateUserDisplay(userData);
+        this.loadConversations();
+        this.setupWelcomeSuggestions();
+      } else {
+        console.log('[ChatApp] No valid user data, logging out');
+        window.Auth.logout();
+      }
+    } catch (error) {
+      console.error('[ChatApp] User verification failed:', error);
+      window.Auth.logout();
+    }
+  },
+
+  async verifyTokenAndGetUser() {
+    console.log('[ChatApp] verifyTokenAndGetUser called');
+    const tokenKey = window.getValidTokenKey?.();
+    console.log('[ChatApp] tokenKey:', tokenKey);
+    if (!tokenKey) {
+      console.log('[ChatApp] No token key found');
+      return null;
+    }
+    try {
+      const authHeader = window.getAuthHeader?.(tokenKey);
+      console.log('[ChatApp] authHeader for /auth/me:', authHeader);
+      const response = await fetch(`${API_BASE}/auth/me`, {
+        headers: authHeader
+      });
+      console.log('[ChatApp] /auth/me response status:', response.status);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[ChatApp] /auth/me data:', data);
+        return data;
+      }
+      return null;
+    } catch (error) {
+      console.error('[ChatApp] verifyTokenAndGetUser error:', error);
+      return null;
+    }
   },
 
   bindEvents() {
@@ -41,12 +88,18 @@ const ChatApp = {
       chatForm.addEventListener('submit', (e) => this.handleSendMessage(e));
     }
 
-    // Chat input auto-resize
+    // Chat input auto-resize and send button state
     const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('chatSendBtn');
     if (chatInput) {
-      chatInput.addEventListener('input', () => this.autoResizeTextarea(chatInput));
+      chatInput.addEventListener('input', () => {
+        this.autoResizeTextarea(chatInput);
+        this.updateSendButtonState(chatInput, sendBtn);
+      });
       chatInput.addEventListener('keydown', (e) => this.handleKeydown(e));
     }
+    // Initial send button state
+    this.updateSendButtonState(chatInput, sendBtn);
 
     // Close modal on overlay click
     const newChatModal = document.getElementById('newChatModal');
@@ -66,6 +119,45 @@ const ChatApp = {
     });
   },
 
+  initUserMenu() {
+    const userMenuTrigger = document.getElementById('userMenuTrigger');
+    const userDropdown = document.getElementById('userDropdown');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    if (userMenuTrigger && userDropdown) {
+      function toggleDropdown() {
+        const isOpen = userDropdown.getAttribute('aria-hidden') === 'false';
+        userDropdown.setAttribute('aria-hidden', isOpen ? 'true' : 'false');
+        userMenuTrigger.setAttribute('aria-expanded', (!isOpen).toString());
+      }
+
+      userMenuTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleDropdown();
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!userMenuTrigger.contains(e.target) && !userDropdown.contains(e.target)) {
+          userDropdown.setAttribute('aria-hidden', 'true');
+          userMenuTrigger.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          userDropdown.setAttribute('aria-hidden', 'true');
+          userMenuTrigger.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', () => {
+        window.Auth.logout();
+      });
+    }
+  },
+
   setupWelcomeSuggestions() {
     document.querySelectorAll('.suggestion-chip').forEach(chip => {
       chip.addEventListener('click', () => {
@@ -78,7 +170,10 @@ const ChatApp = {
   },
 
   async loadConversations() {
-    this.showConversationsLoading();
+    // Only show loading if we don't have conversations yet
+    if (this.conversations.length === 0) {
+      this.showConversationsLoading();
+    }
     try {
       const response = await fetch(`${API_BASE}/chat/conversations`, {
         headers: this.getAuthHeader()
@@ -104,7 +199,10 @@ const ChatApp = {
       this.renderConversations();
     } catch (error) {
       console.error('Failed to load conversations:', error);
-      this.showConversationsError();
+      // Only show error if we have no conversations to display
+      if (this.conversations.length === 0) {
+        this.showConversationsError();
+      }
     }
   },
 
@@ -141,12 +239,16 @@ const ChatApp = {
   },
 
   async sendMessage(message, conversationId = null) {
+    console.log('[ChatApp] sendMessage called, conversationId:', conversationId);
+    const authHeader = this.getAuthHeader();
+    console.log('[ChatApp] sendMessage authHeader:', authHeader);
+    
     try {
       const response = await fetch(`${API_BASE}/chat/message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...this.getAuthHeader()
+          ...authHeader
         },
         body: JSON.stringify({
           message,
@@ -154,19 +256,25 @@ const ChatApp = {
         })
       });
 
+      console.log('[ChatApp] sendMessage response status:', response.status);
+
       if (response.status === 401) {
+        console.log('[ChatApp] 401 Unauthorized - logging out');
         window.Auth.logout();
         return null;
       }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('[ChatApp] sendMessage error:', errorData);
         throw new Error(errorData.detail || 'Failed to send message');
       }
 
-      return await response.json();
+      const result = await response.json();
+      console.log('[ChatApp] sendMessage success:', result);
+      return result;
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('[ChatApp] sendMessage failed:', error);
       throw error;
     }
   },
@@ -213,7 +321,10 @@ const ChatApp = {
     try {
       const response = await this.sendMessage(message, conversationId);
 
-      if (!response) return; // Auth error handled in sendMessage
+      if (!response) {
+        this.hideTypingIndicator();
+        return; // Auth error handled in sendMessage (logout)
+      }
 
       this.hideTypingIndicator();
 
@@ -221,11 +332,14 @@ const ChatApp = {
       this.addMessage('assistant', response.assistant_message.content);
 
       // Update conversation ID if new conversation was created
-      if (!this.currentConversationId) {
+      const isNewConversation = !this.currentConversationId;
+      if (isNewConversation) {
         this.currentConversationId = response.conversation_id;
+        // Optimistically add new conversation to sidebar immediately
+        this.addConversationToSidebar(response.conversation_id, message);
       }
 
-      // Refresh conversations list to get updated preview/title
+      // Refresh conversations list to get updated preview/title from backend
       await this.loadConversations();
     } catch (error) {
       this.hideTypingIndicator();
@@ -235,26 +349,58 @@ const ChatApp = {
     }
   },
 
+  addConversationToSidebar(conversationId, firstMessage) {
+    const title = firstMessage.length > 50 ? firstMessage.substring(0, 50) + '...' : firstMessage;
+    const preview = firstMessage.length > 100 ? firstMessage.substring(0, 100) + '...' : firstMessage;
+    const now = new Date().toISOString();
+
+    // Check if conversation already exists in list
+    const exists = this.conversations.some(c => c.id === conversationId);
+    if (!exists) {
+      this.conversations.unshift({
+        id: conversationId,
+        title: title,
+        preview: preview,
+        updatedAt: now
+      });
+      this.renderConversations();
+    }
+  },
+
   async handleSendMessage(e) {
+    console.log('[ChatApp] handleSendMessage called');
     e.preventDefault();
 
     const input = document.getElementById('chatInput');
     const sendBtn = document.getElementById('chatSendBtn');
 
-    if (!input || !input.value.trim() || this.isLoading) return;
+    console.log('[ChatApp] input value:', input?.value);
+    console.log('[ChatApp] isLoading:', this.isLoading);
+
+    if (!input || !input.value.trim() || this.isLoading) {
+      console.log('[ChatApp] Early return - input missing, empty, or loading');
+      return;
+    }
 
     const message = input.value.trim();
     input.value = '';
     input.style.height = 'auto';
-    sendBtn.disabled = true;
+    this.updateSendButtonState(input, sendBtn);
+
+    // Show chat window if this is a new conversation (welcome state)
+    if (!this.currentConversationId) {
+      this.showChatWindow();
+    }
 
     // Add user message immediately
     this.addMessage('user', message);
 
-    // Send to backend
+    // Send to backend (handles loading state and button disabling)
+    console.log('[ChatApp] Calling sendMessageToBackend');
     await this.sendMessageToBackend(message, this.currentConversationId);
 
-    sendBtn.disabled = false;
+    // Sync button state with input content (empty after send)
+    this.updateSendButtonState(input, sendBtn);
     input.focus();
   },
 
@@ -458,6 +604,12 @@ const ChatApp = {
     textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
   },
 
+  updateSendButtonState(textarea, sendBtn) {
+    if (!textarea || !sendBtn) return;
+    const hasContent = textarea.value.trim().length > 0;
+    sendBtn.disabled = hasContent ? false : true;
+  },
+
   openNewChatModal() {
     const modal = document.getElementById('newChatModal');
     if (modal) {
@@ -481,25 +633,22 @@ const ChatApp = {
     this.startNewConversation();
   },
 
-  updateUserDisplay() {
-    // Update user avatar and name in header from auth
-    const user = window.getStoredUserAny ? window.getStoredUserAny() : null;
-    if (user) {
-      const avatar = document.getElementById('userAvatar');
-      const name = document.getElementById('userName');
-      const dropdownAvatar = document.getElementById('dropdownAvatar');
-      const dropdownName = document.getElementById('dropdownUserName');
-      const dropdownRole = document.getElementById('dropdownUserRole');
+  updateUserDisplay(user) {
+    if (!user) return;
+    const avatar = document.getElementById('userAvatar');
+    const name = document.getElementById('userName');
+    const dropdownAvatar = document.getElementById('dropdownAvatar');
+    const dropdownName = document.getElementById('dropdownUserName');
+    const dropdownRole = document.getElementById('dropdownUserRole');
 
-      const initials = user.email ? user.email.charAt(0).toUpperCase() : 'U';
-      const roleLabel = user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User';
+    const initials = user.email ? user.email.charAt(0).toUpperCase() : 'U';
+    const roleLabel = user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User';
 
-      if (avatar) avatar.textContent = initials;
-      if (name) name.textContent = user.email || 'User';
-      if (dropdownAvatar) dropdownAvatar.textContent = initials;
-      if (dropdownName) dropdownName.textContent = user.email || 'User';
-      if (dropdownRole) dropdownRole.textContent = roleLabel;
-    }
+    if (avatar) avatar.textContent = initials;
+    if (name) name.textContent = user.email || 'User';
+    if (dropdownAvatar) dropdownAvatar.textContent = initials;
+    if (dropdownName) dropdownName.textContent = user.email || 'User';
+    if (dropdownRole) dropdownRole.textContent = roleLabel;
   },
 
   scrollToBottom() {

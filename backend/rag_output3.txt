@@ -1,0 +1,8 @@
+Answer: Normal adult blood pressure is generally considered to be below 120/80 mmHg【Clinical Guidelines.txt, Page/Chunk 0】.
+
+**Disclaimer:** This information is for educational purposes only and does not replace professional medical advice. Always consult a qualified healthcare provider for personal health concerns.
+
+---
+**Disclaimer:** This AI assistant provides general health information only. It is not a substitute for professional medical advice, diagnosis, or treatment. For medical emergencies, call emergency services immediately. For personalized medical advice, consult with a qualified healthcare professional.
+Has context: True
+Model: openai/gpt-oss-120b

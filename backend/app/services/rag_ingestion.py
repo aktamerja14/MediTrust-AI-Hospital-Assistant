@@ -122,6 +122,7 @@ class RAGIngestionService:
             for page in pages:
                 base_metadata = {
                     "document_id": document_id,
+                    "source": doc_meta["original_filename"],
                     "source_filename": doc_meta["original_filename"],
                     "storage_filename": doc_meta["storage_filename"],
                     "page_number": page["page_number"],

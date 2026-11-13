@@ -987,8 +987,6 @@ document.addEventListener('DOMContentLoaded', () => {
     LoginPage.init();
   } else if (document.body.classList.contains('auth-signup-page')) {
     SignupPage.init();
-  } else if (document.body.classList.contains('admin-login-page')) {
-    LoginPage.init(); // Admin login uses same logic but with admin role check
   }
 
   // Initialize main website auth (index.html) - shows profile or login buttons
@@ -1005,3 +1003,6 @@ window.getValidTokenKey = getValidTokenKey;
 window.verifyToken = verifyToken;
 window.getStoredUserAny = getStoredUserAny;
 window.clearAllAuthData = clearAllAuthData;
+window.getAuthHeader = getAuthHeader;
+window.getAuthHeaderAny = getAuthHeaderAny;
+window.getValidAuthHeader = getValidAuthHeader;

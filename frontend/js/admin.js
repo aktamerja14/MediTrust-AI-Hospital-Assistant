@@ -431,6 +431,23 @@ const AdminDocuments = {
       confirmDeleteBtn.addEventListener('click', () => this.confirmDelete());
     }
 
+    // Ingest modal handlers
+    const closeIngestBtn = document.getElementById('closeIngestModal');
+    const cancelIngestBtn = document.getElementById('cancelIngestBtn');
+    const confirmIngestBtn = document.getElementById('confirmIngestBtn');
+
+    if (closeIngestBtn) {
+      closeIngestBtn.addEventListener('click', () => this.closeIngestModal());
+    }
+
+    if (cancelIngestBtn) {
+      cancelIngestBtn.addEventListener('click', () => this.closeIngestModal());
+    }
+
+    if (confirmIngestBtn) {
+      confirmIngestBtn.addEventListener('click', () => this.confirmIngest());
+    }
+
     const prevBtn = document.getElementById('prevPageBtn');
     const nextBtn = document.getElementById('nextPageBtn');
     const retryBtn = document.getElementById('retryDocumentsBtn');
@@ -741,13 +758,23 @@ const AdminDocuments = {
       </td>
 
       <td>
-        <button
-          type="button"
-          class="action-btn action-delete"
-          data-document-id="${escapeHTML(doc.document_id)}"
-          data-document-name="${escapeHTML(doc.original_filename)}">
-          Delete
-        </button>
+        <div class="action-buttons">
+          <button
+            type="button"
+            class="action-btn action-ingest ${doc.processing_status === 'completed' ? 'hidden' : ''}"
+            data-document-id="${escapeHTML(doc.document_id)}"
+            data-document-name="${escapeHTML(doc.original_filename)}"
+            ${doc.processing_status === 'processing' ? 'disabled' : ''}>
+            ${doc.processing_status === 'completed' ? 'Ingested' : (doc.processing_status === 'processing' ? 'Processing...' : 'Ingest')}
+          </button>
+          <button
+            type="button"
+            class="action-btn action-delete"
+            data-document-id="${escapeHTML(doc.document_id)}"
+            data-document-name="${escapeHTML(doc.original_filename)}">
+            Delete
+          </button>
+        </div>
       </td>
     `;
 
@@ -757,6 +784,15 @@ const AdminDocuments = {
   tbody.querySelectorAll('.action-delete').forEach(btn => {
     btn.addEventListener('click', () => {
       this.openDeleteModal(
+        btn.dataset.documentId,
+        btn.dataset.documentName
+      );
+    });
+  });
+
+  tbody.querySelectorAll('.action-ingest').forEach(btn => {
+    btn.addEventListener('click', () => {
+      this.openIngestModal(
         btn.dataset.documentId,
         btn.dataset.documentName
       );
@@ -917,7 +953,127 @@ const AdminDocuments = {
     } finally {
       setButtonLoading(deleteBtn, false);
     }
-  }
+  },
+
+  openIngestModal(documentId, documentName) {
+    this.selectedDocumentId = documentId;
+
+    const ingestModal = document.getElementById('ingestModal');
+    const ingestDocName = document.getElementById('ingestModalSubtitle');
+
+    if (ingestDocName) {
+      ingestDocName.textContent = `Processing: ${escapeHTML(documentName)}`;
+    }
+
+    // Reset progress steps
+    document.querySelectorAll('.progress-step').forEach(step => {
+      step.classList.remove('active', 'completed', 'error');
+    });
+
+    // Hide error and confirm button, show cancel
+    const ingestError = document.getElementById('ingestError');
+    const confirmIngestBtn = document.getElementById('confirmIngestBtn');
+    const cancelIngestBtn = document.getElementById('cancelIngestBtn');
+    const closeIngestBtn = document.getElementById('closeIngestModal');
+
+    if (ingestError) ingestError.hidden = true;
+    if (confirmIngestBtn) confirmIngestBtn.hidden = true;
+    if (cancelIngestBtn) cancelIngestBtn.hidden = false;
+    if (closeIngestBtn) closeIngestBtn.hidden = true;
+
+    if (ingestModal) {
+      openModal('ingestModal');
+    }
+  },
+
+  closeIngestModal() {
+    closeModal('ingestModal');
+    this.selectedDocumentId = null;
+  },
+
+  async confirmIngest() {
+    if (!this.selectedDocumentId) return;
+
+    const confirmBtn = document.getElementById('confirmIngestBtn');
+    const cancelBtn = document.getElementById('cancelIngestBtn');
+    const closeBtn = document.getElementById('closeIngestModal');
+    const ingestError = document.getElementById('ingestError');
+
+    setButtonLoading(confirmBtn, true);
+    if (cancelBtn) cancelBtn.disabled = true;
+    if (ingestError) ingestError.hidden = true;
+
+    try {
+      // Step 1: Loading document
+      this.updateIngestStep('stepLoad', 'active');
+
+      // Call ingestion endpoint
+      const response = await fetch(
+        `${API_BASE}/admin/documents/${encodeURIComponent(this.selectedDocumentId)}/ingest`,
+        {
+          method: 'POST',
+          headers: getAdminAuthHeader()
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+
+      if (response.status === 401 || response.status === 403) {
+        AdminAuth.logout();
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Ingestion failed');
+      }
+
+      // Update progress steps to completed
+      this.updateIngestStep('stepLoad', 'completed');
+      this.updateIngestStep('stepSplit', 'completed');
+      this.updateIngestStep('stepEmbed', 'completed');
+      this.updateIngestStep('stepStore', 'completed');
+
+      showToast('Document ingested successfully! Chunks created: ' + (data.chunks_created || 0), 'success');
+
+      // Show close button, hide cancel
+      if (confirmBtn) confirmBtn.hidden = true;
+      if (cancelBtn) cancelBtn.hidden = true;
+      if (closeBtn) closeBtn.hidden = false;
+
+      // Reload documents to show updated status
+      await this.loadDocuments();
+
+    } catch (error) {
+      // Mark current step as error
+      document.querySelectorAll('.progress-step.active').forEach(step => {
+        step.classList.remove('active');
+        step.classList.add('error');
+      });
+
+      if (ingestError) {
+        ingestError.textContent = error.message;
+        ingestError.hidden = false;
+      }
+
+      // Show close button, hide cancel
+      if (confirmBtn) confirmBtn.hidden = true;
+      if (cancelBtn) cancelBtn.hidden = true;
+      if (closeBtn) closeBtn.hidden = false;
+
+      showToast(error.message, 'error');
+    } finally {
+      setButtonLoading(confirmBtn, false);
+      if (cancelBtn) cancelBtn.disabled = false;
+    }
+  },
+
+  updateIngestStep(stepId, state) {
+    const step = document.getElementById(stepId);
+    if (step) {
+      step.classList.remove('active', 'completed', 'error');
+      step.classList.add(state);
+    }
+  },
 };
 
 // ============================================================================
