@@ -1,7 +1,7 @@
 """AI Chatbot API routes - accessible by both patients and admins."""
 import logging
 from typing import Annotated, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -20,11 +20,23 @@ router = APIRouter(prefix="/chat", tags=["AI Chatbot"])
 CHAT_HISTORY_COLLECTION = "chat_history"
 
 
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Ensure datetime is timezone-aware UTC. MongoDB stores naive UTC datetimes."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class ChatMessage(BaseModel):
     """Chat message structure."""
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message timestamp")
+    timestamp: datetime = Field(default_factory=_utc_now, description="Message timestamp")
 
 
 class SourceReference(BaseModel):
@@ -42,14 +54,20 @@ class ChatConversation(BaseModel):
     user_id: str = Field(..., description="User ID who owns this conversation")
     title: str = Field(..., description="Conversation title")
     messages: list[ChatMessage] = Field(default_factory=list, description="List of messages")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="Conversation creation timestamp")
-    updated_at: datetime = Field(default_factory=datetime.utcnow, description="Last update timestamp")
+    created_at: datetime = Field(default_factory=_utc_now, description="Conversation creation timestamp")
+    updated_at: datetime = Field(default_factory=_utc_now, description="Last update timestamp (title, settings)")
+    last_message_at: datetime = Field(default_factory=_utc_now, description="Last message timestamp")
 
 
 class ChatRequest(BaseModel):
     """Request to send a message in a conversation."""
     message: str = Field(..., min_length=1, max_length=4000, description="User message")
     conversation_id: Optional[str] = Field(None, description="Existing conversation ID (optional)")
+
+
+class ConversationRenameRequest(BaseModel):
+    """Request to rename a conversation."""
+    title: str = Field(..., min_length=1, max_length=200, description="New conversation title")
 
 
 class ChatResponse(BaseModel):
@@ -67,6 +85,7 @@ class ConversationListItem(BaseModel):
     id: str
     title: str
     preview: str
+    last_message_at: datetime
     updated_at: datetime
 
 
@@ -121,26 +140,36 @@ async def send_message(
                 "user_id": current_user.id
             })
             if conversation_doc:
+                raw_messages = conversation_doc.get("messages", [])
+                messages = []
+                for msg in raw_messages:
+                    msg_copy = dict(msg)
+                    if "timestamp" in msg_copy:
+                        msg_copy["timestamp"] = _ensure_utc(msg_copy["timestamp"])
+                    messages.append(ChatMessage(**msg_copy))
                 conversation = ChatConversation(
                     id=str(conversation_doc["_id"]),
                     user_id=conversation_doc["user_id"],
                     title=conversation_doc["title"],
-                    messages=[ChatMessage(**msg) for msg in conversation_doc.get("messages", [])],
-                    created_at=conversation_doc["created_at"],
-                    updated_at=conversation_doc["updated_at"],
+                    messages=messages,
+                    created_at=_ensure_utc(conversation_doc["created_at"]),
+                    updated_at=_ensure_utc(conversation_doc["updated_at"]),
+                    last_message_at=_ensure_utc(conversation_doc.get("last_message_at", conversation_doc["updated_at"])),
                 )
         except Exception:
             pass
 
     if not conversation:
         # Create new conversation
+        now = _utc_now()
         conversation = ChatConversation(
             id="",  # Will be set after insert
             user_id=current_user.id,
             title=request.message[:50] + ("..." if len(request.message) > 50 else ""),
             messages=[],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=now,
+            updated_at=now,
+            last_message_at=now,
         )
 
     # Add user message
@@ -185,8 +214,10 @@ async def send_message(
     assistant_message = ChatMessage(role="assistant", content=assistant_content)
     conversation.messages.append(assistant_message)
 
-    # Update timestamp
-    conversation.updated_at = datetime.utcnow()
+    # Update timestamps
+    now = _utc_now()
+    conversation.updated_at = now
+    conversation.last_message_at = now
 
     # Save to database
     conversation_doc = {
@@ -195,6 +226,7 @@ async def send_message(
         "messages": [msg.model_dump() for msg in conversation.messages],
         "created_at": conversation.created_at,
         "updated_at": conversation.updated_at,
+        "last_message_at": conversation.last_message_at,
     }
 
     if conversation.id:
@@ -241,12 +273,12 @@ async def list_conversations(
     List all chat conversations for the current user.
 
     Both patients and admins can use this endpoint.
-    Returns conversations sorted by most recent first.
+    Returns conversations sorted by most recent message first.
     """
     cursor = db[CHAT_HISTORY_COLLECTION].find(
         {"user_id": current_user.id},
-        {"title": 1, "messages": 1, "updated_at": 1}
-    ).sort("updated_at", -1)
+        {"title": 1, "messages": 1, "last_message_at": 1, "created_at": 1, "updated_at": 1}
+    ).sort("last_message_at", -1)
 
     conversations = []
     async for doc in cursor:
@@ -258,11 +290,15 @@ async def list_conversations(
             if len(last_msg.get("content", "")) > 100:
                 preview += "..."
 
+        last_msg_at = doc.get("last_message_at", doc.get("updated_at", doc.get("created_at")))
+        updated_at = doc.get("updated_at", doc.get("created_at"))
+
         conversations.append(ConversationListItem(
             id=str(doc["_id"]),
             title=doc.get("title", "Untitled"),
             preview=preview,
-            updated_at=doc.get("updated_at", doc.get("created_at", datetime.utcnow())),
+            last_message_at=_ensure_utc(last_msg_at) if last_msg_at else _utc_now(),
+            updated_at=_ensure_utc(updated_at) if updated_at else _utc_now(),
         ))
 
     return ConversationListResponse(conversations=conversations)
@@ -311,13 +347,22 @@ async def get_conversation(
             detail="Conversation not found"
         )
 
+    raw_messages = conversation_doc.get("messages", [])
+    messages = []
+    for msg in raw_messages:
+        msg_copy = dict(msg)
+        if "timestamp" in msg_copy:
+            msg_copy["timestamp"] = _ensure_utc(msg_copy["timestamp"])
+        messages.append(ChatMessage(**msg_copy))
+
     return ChatConversation(
         id=str(conversation_doc["_id"]),
         user_id=conversation_doc["user_id"],
         title=conversation_doc["title"],
-        messages=[ChatMessage(**msg) for msg in conversation_doc.get("messages", [])],
-        created_at=conversation_doc["created_at"],
-        updated_at=conversation_doc["updated_at"],
+        messages=messages,
+        created_at=_ensure_utc(conversation_doc["created_at"]),
+        updated_at=_ensure_utc(conversation_doc["updated_at"]),
+        last_message_at=_ensure_utc(conversation_doc.get("last_message_at", conversation_doc.get("updated_at", conversation_doc["created_at"]))),
     )
 
 
@@ -367,3 +412,77 @@ async def delete_conversation(
     logger.info("Conversation deleted: %s by user: %s", conversation_id, current_user.email)
 
     return {"message": "Conversation deleted successfully", "conversation_id": conversation_id}
+
+
+@router.patch(
+    "/conversations/{conversation_id}",
+    response_model=ChatConversation,
+    summary="Rename a conversation",
+    responses={
+        200: {"description": "Conversation renamed successfully"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Inactive user account or access denied"},
+        404: {"description": "Conversation not found"},
+        422: {"description": "Validation error"},
+    },
+    dependencies=[Depends(require_any_role)],
+)
+async def rename_conversation(
+    conversation_id: str,
+    request: ConversationRenameRequest,
+    current_user: Annotated[UserResponse, Depends(get_current_active_user)],
+    db: Annotated[AsyncDatabase, Depends(get_db)],
+) -> ChatConversation:
+    """
+    Rename a conversation.
+
+    Both patients and admins can use this endpoint.
+    Users can only rename their own conversations.
+    """
+    try:
+        from bson import ObjectId
+        obj_id = ObjectId(conversation_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    # Update title and updated_at
+    now = _utc_now()
+    result = await db[CHAT_HISTORY_COLLECTION].update_one(
+        {"_id": obj_id, "user_id": current_user.id},
+        {"$set": {"title": request.title, "updated_at": now}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found"
+        )
+
+    # Fetch updated conversation
+    conversation_doc = await db[CHAT_HISTORY_COLLECTION].find_one({
+        "_id": obj_id,
+        "user_id": current_user.id
+    })
+
+    logger.info("Conversation renamed: %s by user: %s", conversation_id, current_user.email)
+
+    raw_messages = conversation_doc.get("messages", [])
+    messages = []
+    for msg in raw_messages:
+        msg_copy = dict(msg)
+        if "timestamp" in msg_copy:
+            msg_copy["timestamp"] = _ensure_utc(msg_copy["timestamp"])
+        messages.append(ChatMessage(**msg_copy))
+
+    return ChatConversation(
+        id=str(conversation_doc["_id"]),
+        user_id=conversation_doc["user_id"],
+        title=conversation_doc["title"],
+        messages=messages,
+        created_at=_ensure_utc(conversation_doc["created_at"]),
+        updated_at=_ensure_utc(conversation_doc["updated_at"]),
+        last_message_at=_ensure_utc(conversation_doc.get("last_message_at", conversation_doc.get("updated_at", conversation_doc["created_at"]))),
+    )

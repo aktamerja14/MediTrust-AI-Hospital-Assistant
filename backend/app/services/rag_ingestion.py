@@ -6,7 +6,7 @@ Tracks processing status in MongoDB.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from pymongo.asynchronous.database import AsyncDatabase
@@ -18,6 +18,11 @@ from app.ai.rag.text_splitter import TextSplitter, TextChunk
 from app.ai.vectorstore.base import VectorDocument
 from app.ai.vectorstore.factory import VectorStoreFactory
 from app.core.config import settings
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 from app.services.document_service import DocumentService
 
 logger = logging.getLogger("meditrust.services.rag_ingestion")
@@ -162,7 +167,7 @@ class RAGIngestionService:
                     "metadata": chunk.metadata,
                     "embedding_model": settings.EMBEDDING_MODEL,
                     "processing_status": STATUS_COMPLETED,
-                    "created_at": datetime.utcnow(),
+                    "created_at": _utc_now(),
                 }
                 await self.chunks_collection.insert_one(chunk_meta)
 
@@ -209,7 +214,7 @@ class RAGIngestionService:
         try:
             update = {
                 "processing_status": status,
-                "processing_updated_at": datetime.utcnow(),
+                "processing_updated_at": _utc_now(),
             }
             if error:
                 update["processing_error"] = error

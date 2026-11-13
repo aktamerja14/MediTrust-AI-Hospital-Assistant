@@ -10,6 +10,8 @@ const ChatApp = {
   conversations: [],
   isLoading: false,
   currentUser: null,
+  editingConversationId: null,
+  deletingConversationId: null,
 
   init() {
     console.log('[ChatApp] init() called');
@@ -82,6 +84,37 @@ const ChatApp = {
       confirmNewChatBtn.addEventListener('click', () => this.confirmNewChat());
     }
 
+    // Rename modal buttons
+    const cancelRenameBtn = document.getElementById('cancelRenameBtn');
+    const confirmRenameBtn = document.getElementById('confirmRenameBtn');
+    const renameInput = document.getElementById('renameInput');
+    if (cancelRenameBtn) {
+      cancelRenameBtn.addEventListener('click', () => this.closeRenameModal());
+    }
+    if (confirmRenameBtn) {
+      confirmRenameBtn.addEventListener('click', () => this.confirmRename());
+    }
+    if (renameInput) {
+      renameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.confirmRename();
+        } else if (e.key === 'Escape') {
+          this.closeRenameModal();
+        }
+      });
+    }
+
+    // Delete modal buttons
+    const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+    if (cancelDeleteBtn) {
+      cancelDeleteBtn.addEventListener('click', () => this.closeDeleteModal());
+    }
+    if (confirmDeleteBtn) {
+      confirmDeleteBtn.addEventListener('click', () => this.confirmDelete());
+    }
+
     // Chat form submission
     const chatForm = document.getElementById('chatForm');
     if (chatForm) {
@@ -111,10 +144,31 @@ const ChatApp = {
       });
     }
 
+    const renameModal = document.getElementById('renameModal');
+    if (renameModal) {
+      renameModal.addEventListener('click', (e) => {
+        if (e.target === renameModal) {
+          this.closeRenameModal();
+        }
+      });
+    }
+
+    const deleteModal = document.getElementById('deleteModal');
+    if (deleteModal) {
+      deleteModal.addEventListener('click', (e) => {
+        if (e.target === deleteModal) {
+          this.closeDeleteModal();
+        }
+      });
+    }
+
     // Escape key to close modals
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeNewChatModal();
+        this.closeRenameModal();
+        this.closeDeleteModal();
+        this.closeAllConversationMenus();
       }
     });
   },
@@ -194,7 +248,7 @@ const ChatApp = {
         id: conv.id,
         title: conv.title,
         preview: conv.preview,
-        updatedAt: conv.updated_at
+        updatedAt: conv.last_message_at || conv.updated_at || conv.created_at || new Date().toISOString()
       }));
       this.renderConversations();
     } catch (error) {
@@ -302,6 +356,34 @@ const ChatApp = {
     }
   },
 
+  async renameConversation(conversationId, newTitle) {
+    try {
+      const response = await fetch(`${API_BASE}/chat/conversations/${conversationId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeader()
+        },
+        body: JSON.stringify({ title: newTitle })
+      });
+
+      if (response.status === 401) {
+        window.Auth.logout();
+        return null;
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to rename conversation');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to rename conversation:', error);
+      throw error;
+    }
+  },
+
   startNewConversation(initialMessage = null) {
     this.currentConversationId = null;
     this.showChatWindow();
@@ -336,7 +418,8 @@ const ChatApp = {
       if (isNewConversation) {
         this.currentConversationId = response.conversation_id;
         // Optimistically add new conversation to sidebar immediately
-        this.addConversationToSidebar(response.conversation_id, message);
+        // Use assistant message timestamp from backend (UTC ISO string)
+        this.addConversationToSidebar(response.conversation_id, message, response.assistant_message.timestamp);
       }
 
       // Refresh conversations list to get updated preview/title from backend
@@ -349,10 +432,11 @@ const ChatApp = {
     }
   },
 
-  addConversationToSidebar(conversationId, firstMessage) {
+  addConversationToSidebar(conversationId, firstMessage, timestamp) {
     const title = firstMessage.length > 50 ? firstMessage.substring(0, 50) + '...' : firstMessage;
     const preview = firstMessage.length > 100 ? firstMessage.substring(0, 100) + '...' : firstMessage;
-    const now = new Date().toISOString();
+    // Use backend timestamp if provided, otherwise fallback to current time
+    const updatedAt = timestamp || new Date().toISOString();
 
     // Check if conversation already exists in list
     const exists = this.conversations.some(c => c.id === conversationId);
@@ -361,7 +445,7 @@ const ChatApp = {
         id: conversationId,
         title: title,
         preview: preview,
-        updatedAt: now
+        updatedAt: updatedAt
       });
       this.renderConversations();
     }
@@ -465,24 +549,323 @@ const ChatApp = {
     if (empty) empty.classList.add('hidden');
 
     list.innerHTML = this.conversations.map(conv => `
-      <button type="button" class="conversation-item ${conv.id === this.currentConversationId ? 'active' : ''}"
-              data-conversation-id="${conv.id}">
-        <div class="conversation-avatar">${conv.title.charAt(0).toUpperCase()}</div>
-        <div class="conversation-content">
-          <div class="conversation-title">${this.escapeHtml(conv.title)}</div>
-          <div class="conversation-preview">${this.escapeHtml(conv.preview || 'No messages yet')}</div>
+      <div class="conversation-wrapper" data-conversation-id="${conv.id}">
+        <button type="button" class="conversation-item ${conv.id === this.currentConversationId ? 'active' : ''}"
+                data-conversation-id="${conv.id}"
+                aria-label="Open conversation: ${this.escapeHtml(conv.title)}">
+          <div class="conversation-avatar">${conv.title.charAt(0).toUpperCase()}</div>
+          <div class="conversation-content">
+            <div class="conversation-title">${this.escapeHtml(conv.title)}</div>
+            <div class="conversation-preview">${this.escapeHtml(conv.preview || 'No messages yet')}</div>
+          </div>
+          <span class="conversation-time">${this.formatTime(conv.updatedAt)}</span>
+        </button>
+        <div class="conversation-menu">
+          <button type="button" class="conversation-menu-trigger" aria-label="Conversation options" aria-expanded="false" aria-haspopup="true" data-conversation-id="${conv.id}">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path></svg>
+          </button>
+          <div class="conversation-dropdown" role="menu" aria-hidden="true">
+            <button type="button" class="dropdown-item" role="menuitem" data-action="rename" data-conversation-id="${conv.id}">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+              <span>Rename</span>
+            </button>
+            <button type="button" class="dropdown-item dropdown-item-danger" role="menuitem" data-action="delete" data-conversation-id="${conv.id}">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              <span>Delete</span>
+            </button>
+          </div>
         </div>
-        <span class="conversation-time">${this.formatTime(conv.updatedAt)}</span>
-      </button>
+      </div>
     `).join('');
 
-    // Bind conversation clicks
+    // Bind conversation clicks (only on the main button, not the menu)
     list.querySelectorAll('.conversation-item').forEach(item => {
       item.addEventListener('click', () => {
         const id = item.getAttribute('data-conversation-id');
         this.loadConversation(id);
       });
     });
+
+    // Bind menu triggers
+    list.querySelectorAll('.conversation-menu-trigger').forEach(trigger => {
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleConversationMenu(trigger);
+      });
+      // Keyboard support: Enter/Space to open
+      trigger.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.toggleConversationMenu(trigger);
+        }
+      });
+    });
+
+    // Bind menu actions
+    list.querySelectorAll('.conversation-dropdown .dropdown-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = item.getAttribute('data-action');
+        const id = item.getAttribute('data-conversation-id');
+        if (action === 'rename') {
+          this.openRenameModal(id);
+        } else if (action === 'delete') {
+          this.openDeleteModal(id);
+        }
+        this.closeAllConversationMenus();
+      });
+    });
+
+    // Close menus on outside click
+    document.addEventListener('click', (e) => {
+      const clickedMenu = e.target.closest('.conversation-menu');
+      const clickedPortal = e.target.closest('.conversation-dropdown-portal');
+      if (!clickedMenu && !clickedPortal) {
+        this.closeAllConversationMenus();
+      }
+    });
+  },
+
+  toggleConversationMenu(trigger) {
+    const dropdown = trigger.nextElementSibling;
+    const isOpen = dropdown.getAttribute('aria-hidden') === 'false';
+
+    if (isOpen) {
+      this.closeConversationMenu(trigger, dropdown);
+    } else {
+      this.openConversationMenu(trigger, dropdown);
+    }
+  },
+
+  openConversationMenu(trigger, dropdown) {
+    // Close any other open menus first
+    this.closeAllConversationMenus();
+
+    // Clone dropdown for portal (to avoid sidebar overflow clipping)
+    const portalDropdown = dropdown.cloneNode(true);
+    portalDropdown.classList.add('conversation-dropdown-portal');
+    portalDropdown.setAttribute('role', 'menu');
+    portalDropdown.setAttribute('aria-hidden', 'false');
+
+    // Set explicit width before appending to measure correctly
+    portalDropdown.style.width = '165px';
+    portalDropdown.style.minWidth = '160px';
+    portalDropdown.style.maxWidth = '180px';
+
+    // Append to body first to measure
+    document.body.appendChild(portalDropdown);
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const dropdownRect = portalDropdown.getBoundingClientRect();
+    portalDropdown.style.position = 'fixed';
+    portalDropdown.style.top = `${triggerRect.bottom + 4}px`;
+    // Align right edge of dropdown with right edge of trigger
+    let left = triggerRect.right - dropdownRect.width;
+    // Ensure it doesn't go off-screen left
+    if (left < 8) {
+      left = 8;
+    }
+    // Ensure it doesn't go off-screen right
+    const viewportWidth = window.innerWidth;
+    if (left + dropdownRect.width > viewportWidth - 8) {
+      left = viewportWidth - dropdownRect.width - 8;
+    }
+    portalDropdown.style.left = `${left}px`;
+    portalDropdown.style.zIndex = '2100';
+
+    // Re-bind action events for the portal dropdown
+    portalDropdown.querySelectorAll('.dropdown-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = item.getAttribute('data-action');
+        const id = item.getAttribute('data-conversation-id');
+        if (action === 'rename') {
+          this.openRenameModal(id);
+        } else if (action === 'delete') {
+          this.openDeleteModal(id);
+        }
+        this.closeAllConversationMenus();
+      });
+    });
+
+    // Store reference to portal dropdown on trigger for cleanup
+    trigger._portalDropdown = portalDropdown;
+
+    // Update ARIA on original trigger
+    dropdown.setAttribute('aria-hidden', 'true');
+    trigger.setAttribute('aria-expanded', 'true');
+
+    // Focus first menu item for keyboard accessibility
+    const firstItem = portalDropdown.querySelector('.dropdown-item');
+    if (firstItem) {
+      firstItem.focus();
+    }
+
+    // Handle keyboard navigation within dropdown
+    portalDropdown.addEventListener('keydown', (e) => this.handleDropdownKeydown(e, portalDropdown, trigger));
+  },
+
+  closeConversationMenu(trigger, dropdown) {
+    // Remove portal dropdown if exists
+    if (trigger._portalDropdown) {
+      trigger._portalDropdown.remove();
+      trigger._portalDropdown = null;
+    }
+    dropdown.setAttribute('aria-hidden', 'true');
+    trigger.setAttribute('aria-expanded', 'false');
+  },
+
+  closeAllConversationMenus() {
+    document.querySelectorAll('.conversation-menu-trigger').forEach(trigger => {
+      const dropdown = trigger.nextElementSibling;
+      if (trigger._portalDropdown) {
+        trigger._portalDropdown.remove();
+        trigger._portalDropdown = null;
+      }
+      if (dropdown) {
+        dropdown.setAttribute('aria-hidden', 'true');
+      }
+      trigger.setAttribute('aria-expanded', 'false');
+    });
+    // Also clean up any orphaned portal dropdowns
+    document.querySelectorAll('.conversation-dropdown-portal').forEach(el => el.remove());
+  },
+
+  handleDropdownKeydown(e, portalDropdown, trigger) {
+    const items = portalDropdown.querySelectorAll('.dropdown-item');
+    const currentIndex = Array.from(items).findIndex(item => item === document.activeElement);
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const nextIndex = (currentIndex + 1) % items.length;
+      items[nextIndex].focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prevIndex = (currentIndex - 1 + items.length) % items.length;
+      items[prevIndex].focus();
+    } else if (e.key === 'Escape' || e.key === 'Tab') {
+      e.preventDefault();
+      this.closeConversationMenu(trigger, trigger.nextElementSibling);
+      trigger.focus();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      // Let the click handler handle Enter/Space on menu items
+      if (e.target.classList.contains('dropdown-item')) {
+        e.target.click();
+      }
+    }
+  },
+
+  openRenameModal(conversationId) {
+    const conv = this.conversations.find(c => c.id === conversationId);
+    if (!conv) return;
+
+    this.editingConversationId = conversationId;
+
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+    const errorEl = document.getElementById('renameError');
+
+    if (modal && input) {
+      input.value = conv.title;
+      input.focus();
+      input.select();
+      if (errorEl) errorEl.textContent = '';
+      modal.classList.add('active');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+  },
+
+  closeRenameModal() {
+    const modal = document.getElementById('renameModal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+    this.editingConversationId = null;
+  },
+
+  async confirmRename() {
+    const input = document.getElementById('renameInput');
+    const errorEl = document.getElementById('renameError');
+    const newTitle = input?.value?.trim();
+
+    if (!newTitle) {
+      if (errorEl) errorEl.textContent = 'Title cannot be empty';
+      input?.focus();
+      return;
+    }
+
+    if (newTitle.length > 200) {
+      if (errorEl) errorEl.textContent = 'Title must be 200 characters or less';
+      input?.focus();
+      return;
+    }
+
+    try {
+      const result = await this.renameConversation(this.editingConversationId, newTitle);
+      if (result) {
+        // Update local conversation list
+        const idx = this.conversations.findIndex(c => c.id === this.editingConversationId);
+        if (idx !== -1) {
+          this.conversations[idx].title = result.title;
+          this.renderConversations();
+        }
+        this.closeRenameModal();
+      }
+    } catch (error) {
+      if (errorEl) errorEl.textContent = error.message;
+    }
+  },
+
+  openDeleteModal(conversationId) {
+    this.deletingConversationId = conversationId;
+    const modal = document.getElementById('deleteModal');
+    if (modal) {
+      modal.classList.add('active');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+    }
+  },
+
+  closeDeleteModal() {
+    const modal = document.getElementById('deleteModal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+    this.deletingConversationId = null;
+  },
+
+  async confirmDelete() {
+    try {
+      const success = await this.deleteConversation(this.deletingConversationId);
+      if (success) {
+        // Remove from local list
+        this.conversations = this.conversations.filter(c => c.id !== this.deletingConversationId);
+        this.renderConversations();
+
+        // If deleted conversation was active, clear chat window
+        if (this.currentConversationId === this.deletingConversationId) {
+          this.currentConversationId = null;
+          this.renderMessages([]);
+          this.hideChatWindow();
+          // Optionally load the first available conversation
+          if (this.conversations.length > 0) {
+            this.loadConversation(this.conversations[0].id);
+          }
+        }
+
+        this.closeDeleteModal();
+      }
+    } catch (error) {
+      console.error('Delete failed:', error);
+      // Could show error in modal, for now just close
+      this.closeDeleteModal();
+    }
   },
 
   showConversationsLoading() {
@@ -659,18 +1042,28 @@ const ChatApp = {
   },
 
   formatTime(isoString) {
+    if (!isoString) return 'Unknown time';
     const date = new Date(isoString);
+    if (isNaN(date.getTime())) return 'Invalid time';
+
     const now = new Date();
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
 
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    // Check if it's yesterday (calendar day comparison)
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    }
+
+    // Older: use local calendar date format (e.g., "13 Nov 2026")
+    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   },
 
   escapeHtml(text) {

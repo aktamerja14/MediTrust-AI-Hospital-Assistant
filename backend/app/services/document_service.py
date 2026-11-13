@@ -2,7 +2,7 @@
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -12,6 +12,11 @@ from pymongo.errors import PyMongoError
 from app.core.config import settings
 
 logger = logging.getLogger("meditrust.services.document")
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 DOCUMENTS_COLLECTION = "documents"
 PDF_SIGNATURE = b"%PDF"
@@ -164,7 +169,7 @@ class DocumentService:
             "storage_filename": storage_filename,
             "file_type": file_type,
             "file_size": file_size,
-            "upload_timestamp": datetime.utcnow(),
+            "upload_timestamp": _utc_now(),
             "processing_status": "uploaded",
             "uploaded_by": uploaded_by,
         }

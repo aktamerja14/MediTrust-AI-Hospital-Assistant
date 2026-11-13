@@ -7,7 +7,7 @@ from typing import List
 from app.ai.vectorstore.base import SearchResult
 
 
-# Medical disclaimer included in all responses
+# Medical disclaimer for medical advice responses
 MEDICAL_DISCLAIMER = (
     "\n\n---\n"
     "**Disclaimer:** This AI assistant provides general health information only. "
@@ -42,9 +42,13 @@ def build_rag_prompt(
         "clearly state: \"I don't have enough information in the provided documents "
         "to answer this question.\"\n"
         "3. NEVER invent medical facts, diagnoses, treatments, or citations.\n"
-        "4. Always cite sources using [Document Name, Page/Chunk X] format.\n"
-        "5. Be concise but thorough.\n"
-        "6. Do not claim to be a doctor or provide medical diagnoses."
+        "4. Cite sources using [Source Name] format (short).\n"
+        "5. Response length guidelines:\n"
+        "   - Simple factual questions (hours, locations, departments): 1-3 sentences.\n"
+        "   - Complex medical questions: Structured answer with relevant details.\n"
+        "   - Unknown information: Brief statement that info is unavailable.\n"
+        "6. Do NOT include medical disclaimers in your response - they are added automatically when needed.\n"
+        "7. Do not claim to be a doctor or provide medical diagnoses."
     )
 
     # Build context from retrieved chunks
@@ -52,9 +56,8 @@ def build_rag_prompt(
     for i, result in enumerate(results, 1):
         doc = result.document
         source_name = doc.metadata.get("source", "Unknown Document")
-        page = doc.metadata.get("page", doc.metadata.get("chunk_index", "N/A"))
         context_parts.append(
-            f"[Source {i}: {source_name}, Page/Chunk {page}]\n{doc.content}"
+            f"[Source {i}: {source_name}]\n{doc.content}"
         )
 
     context = "\n\n".join(context_parts) if context_parts else "No relevant documents found."
