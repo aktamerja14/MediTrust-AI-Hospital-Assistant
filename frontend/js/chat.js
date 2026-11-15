@@ -12,6 +12,10 @@ const ChatApp = {
   currentUser: null,
   editingConversationId: null,
   deletingConversationId: null,
+  messageFeedbackCache: {},
+  ratingModalShown: false,
+  ratingInProgress: false,
+  pendingNavigation: false,
 
   init() {
     console.log('[ChatApp] init() called');
@@ -168,9 +172,82 @@ const ChatApp = {
         this.closeNewChatModal();
         this.closeRenameModal();
         this.closeDeleteModal();
+        this.closeRatingModal();
         this.closeAllConversationMenus();
       }
     });
+
+    // End Chat button
+    const endChatBtn = document.getElementById('endChatBtn');
+    if (endChatBtn) {
+      endChatBtn.addEventListener('click', () => this.endChatAndRate());
+    }
+
+    // MediTrust Brand Logo click - intercept for rating flow
+    const brandLogo = document.getElementById('chatBrandLogo');
+    if (brandLogo) {
+      brandLogo.addEventListener('click', (e) => this.handleBrandLogoClick(e));
+    }
+
+    // Rating modal buttons
+    const skipRatingBtn = document.getElementById('skipRatingBtn');
+    const submitRatingBtn = document.getElementById('submitRatingBtn');
+    if (skipRatingBtn) {
+      skipRatingBtn.addEventListener('click', () => this.skipRating());
+    }
+    if (submitRatingBtn) {
+      submitRatingBtn.addEventListener('click', () => this.submitRating());
+    }
+
+    // Rating modal overlay click
+    const ratingModal = document.getElementById('ratingModal');
+    if (ratingModal) {
+      ratingModal.addEventListener('click', (e) => {
+        if (e.target === ratingModal) {
+          this.closeRatingModal();
+        }
+      });
+    }
+
+    // Star rating buttons (delegated)
+    document.addEventListener('click', (e) => {
+      const starBtn = e.target.closest('.star-btn');
+      if (starBtn && starBtn.closest('#ratingModal')) {
+        this.selectStarRating(parseInt(starBtn.dataset.rating, 10));
+      }
+
+      // Feedback buttons (thumbs up/down)
+      const feedbackBtn = e.target.closest('.feedback-btn');
+      if (feedbackBtn && feedbackBtn.closest('#chatMessages')) {
+        const messageId = feedbackBtn.dataset.messageId;
+        const feedbackType = feedbackBtn.dataset.feedback;
+        const messageElement = feedbackBtn.closest('.message');
+        if (messageId && feedbackType && messageElement) {
+          this.handleMessageFeedback(messageElement, messageId, feedbackType);
+        }
+      }
+    });
+
+    // Star rating hover preview (delegated)
+    document.addEventListener('mouseover', (e) => {
+      const starBtn = e.target.closest('.star-btn');
+      if (starBtn && starBtn.closest('#ratingModal') && !this.selectedRating) {
+        this.previewStarRating(parseInt(starBtn.dataset.rating, 10));
+      }
+    });
+
+    document.addEventListener('mouseout', (e) => {
+      const starBtn = e.target.closest('.star-btn');
+      if (starBtn && starBtn.closest('#ratingModal') && !this.selectedRating) {
+        this.clearStarRatingPreview();
+      }
+    });
+
+    // Show rating modal when user tries to leave page
+    window.addEventListener('beforeunload', (e) => this.handleBeforeUnload(e));
+
+    // Show rating modal on browser back/forward navigation
+    window.addEventListener('popstate', (e) => this.handlePopState(e));
   },
 
   initUserMenu() {
@@ -261,6 +338,17 @@ const ChatApp = {
   },
 
   async loadConversation(conversationId) {
+    console.log('[ChatApp] loadConversation: conversationId=%s, currentConversationId=%s',
+                conversationId, this.currentConversationId);
+    // Check if current conversation needs rating before switching
+    if (this.currentConversationId && this.currentConversationId !== conversationId) {
+      await this.checkAndShowRatingPrompt();
+      // If rating modal is shown, don't switch conversations yet
+      if (this.ratingModalShown) {
+        return;
+      }
+    }
+
     this.showMessagesLoading();
     try {
       const response = await fetch(`${API_BASE}/chat/conversations/${conversationId}`, {
@@ -282,12 +370,20 @@ const ChatApp = {
       }
 
       const data = await response.json();
+      console.log('[ChatApp] loadConversation response: conversation_id=%s, message_count=%d',
+                  data.id, (data.messages || []).length);
+      if (data.messages && data.messages.length > 0) {
+        console.log('[ChatApp] loadConversation message IDs:',
+                    data.messages.map(m => `${m.role}:${m.id}`).join(', '));
+      }
       this.currentConversationId = data.id;
       this.renderMessages(data.messages || []);
+      await this.loadMessageFeedbackForConversation(data.id);
       this.showChatWindow();
+      this.updateEndChatButtonVisibility();
       this.renderConversations(); // Update active state
     } catch (error) {
-      console.error('Failed to load conversation:', error);
+      console.error('[ChatApp] Failed to load conversation:', error);
       this.showMessagesError('Failed to load conversation');
     }
   },
@@ -384,10 +480,162 @@ const ChatApp = {
     }
   },
 
-  startNewConversation(initialMessage = null) {
+  async submitMessageFeedback(conversationId, messageId, feedbackType) {
+    console.log('[ChatApp] submitMessageFeedback: conversationId=%s, messageId=%s, feedbackType=%s',
+                conversationId, messageId, feedbackType);
+    try {
+      const response = await fetch(`${API_BASE}/chat/feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeader()
+        },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          message_id: messageId,
+          feedback_type: feedbackType
+        })
+      });
+
+      console.log('[ChatApp] submitMessageFeedback response status:', response.status);
+
+      if (response.status === 401) {
+        window.Auth.logout();
+        return null;
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[ChatApp] submitMessageFeedback error:', errorData);
+        throw new Error(errorData.detail || 'Failed to submit feedback');
+      }
+
+      const result = await response.json();
+      console.log('[ChatApp] submitMessageFeedback success:', result);
+      return result;
+    } catch (error) {
+      console.error('[ChatApp] Failed to submit message feedback:', error);
+      throw error;
+    }
+  },
+
+  async getMessageFeedback(conversationId, messageId) {
+    try {
+      const response = await fetch(`${API_BASE}/chat/feedback/${messageId}?conversation_id=${conversationId}`, {
+        headers: this.getAuthHeader()
+      });
+
+      if (response.status === 401) {
+        window.Auth.logout();
+        return null;
+      }
+
+      if (response.status === 404) {
+        return null;
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to get feedback');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to get message feedback:', error);
+      return null;
+    }
+  },
+
+  async submitConversationRating(conversationId, rating) {
+    try {
+      const response = await fetch(`${API_BASE}/chat/conversations/${conversationId}/rate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getAuthHeader()
+        },
+        body: JSON.stringify({ rating })
+      });
+
+      if (response.status === 401) {
+        window.Auth.logout();
+        return null;
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to submit rating');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to submit conversation rating:', error);
+      throw error;
+    }
+  },
+
+  async getConversationRatingStatus(conversationId) {
+    try {
+      const response = await fetch(`${API_BASE}/chat/conversations/${conversationId}/rate`, {
+        headers: this.getAuthHeader()
+      });
+
+      if (response.status === 401) {
+        window.Auth.logout();
+        return { rated: false };
+      }
+
+      if (response.status === 404) {
+        return { rated: false };
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to get rating status');
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to get conversation rating status:', error);
+      return { rated: false };
+    }
+  },
+
+  async dismissConversationRating(conversationId) {
+    try {
+      const response = await fetch(`${API_BASE}/chat/conversations/${conversationId}/dismiss-rating`, {
+        method: 'POST',
+        headers: this.getAuthHeader()
+      });
+
+      if (response.status === 401) {
+        window.Auth.logout();
+        return false;
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to dismiss rating');
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Failed to dismiss conversation rating:', error);
+      return false;
+    }
+  },
+
+  async startNewConversation(initialMessage = null) {
+    // Check if current conversation needs rating before starting new
+    if (this.currentConversationId) {
+      await this.checkAndShowRatingPrompt();
+      // If rating modal is shown, don't start new conversation yet
+      if (this.ratingModalShown) {
+        return;
+      }
+    }
+
     this.currentConversationId = null;
     this.showChatWindow();
     this.renderMessages([]);
+    this.updateEndChatButtonVisibility();
     this.renderConversations(); // Clear active state
 
     if (initialMessage) {
@@ -397,6 +645,8 @@ const ChatApp = {
   },
 
   async sendMessageToBackend(message, conversationId) {
+    console.log('[ChatApp] sendMessageToBackend: message=%s, conversationId=%s, currentConversationId=%s',
+                message.substring(0, 50), conversationId, this.currentConversationId);
     this.showTypingIndicator();
     this.setInputDisabled(true);
 
@@ -408,10 +658,13 @@ const ChatApp = {
         return; // Auth error handled in sendMessage (logout)
       }
 
+      console.log('[ChatApp] sendMessageToBackend response: conversation_id=%s, assistant_message_id=%s',
+                  response.conversation_id, response.assistant_message.id);
+
       this.hideTypingIndicator();
 
-      // Add assistant message
-      this.addMessage('assistant', response.assistant_message.content);
+      // Add assistant message with backend message ID
+      this.addMessage('assistant', response.assistant_message.content, false, response.assistant_message.id);
 
       // Update conversation ID if new conversation was created
       const isNewConversation = !this.currentConversationId;
@@ -420,6 +673,7 @@ const ChatApp = {
         // Optimistically add new conversation to sidebar immediately
         // Use assistant message timestamp from backend (UTC ISO string)
         this.addConversationToSidebar(response.conversation_id, message, response.assistant_message.timestamp);
+        this.updateEndChatButtonVisibility();
       }
 
       // Refresh conversations list to get updated preview/title from backend
@@ -488,9 +742,9 @@ const ChatApp = {
     input.focus();
   },
 
-  addMessage(role, content, error = false) {
+  addMessage(role, content, error = false, messageId = null) {
     const message = {
-      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+      id: messageId || 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       role,
       content,
       timestamp: new Date().toISOString(),
@@ -523,12 +777,34 @@ const ChatApp = {
     const time = this.formatTime(msg.timestamp);
     const errorClass = msg.error ? 'message-error' : '';
 
+    let feedbackHTML = '';
+    if (!isUser && !msg.error) {
+      const cacheKey = `${this.currentConversationId}:${msg.id}`;
+      const savedFeedback = this.messageFeedbackCache[cacheKey];
+      const positiveActive = savedFeedback === 'positive' ? 'active' : '';
+      const negativeActive = savedFeedback === 'negative' ? 'active' : '';
+
+      feedbackHTML = `
+        <div class="message-feedback" role="group" aria-label="Message feedback">
+          <button type="button" class="feedback-btn ${positiveActive}" data-feedback="positive" data-message-id="${msg.id}" aria-label="Thumbs up" aria-pressed="${savedFeedback === 'positive'}">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"></path></svg>
+          </button>
+          <button type="button" class="feedback-btn ${negativeActive}" data-feedback="negative" data-message-id="${msg.id}" aria-label="Thumbs down" aria-pressed="${savedFeedback === 'negative'}">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 012.427 1.877l3.5 7.002A2 2 0 0118.737 15H14"></path></svg>
+          </button>
+        </div>
+      `;
+    }
+
     return `
       <div class="message ${isUser ? 'message-user' : 'message-assistant'} ${errorClass}" data-message-id="${msg.id}">
         <div class="message-avatar">${avatar}</div>
         <div class="message-content">
           <div class="message-bubble ${errorClass}">${this.escapeHtml(msg.content)}</div>
-          <span class="message-time">${time}</span>
+          <div class="message-meta">
+            <span class="message-time">${time}</span>
+            ${feedbackHTML}
+          </div>
         </div>
       </div>
     `;
@@ -866,6 +1142,330 @@ const ChatApp = {
       // Could show error in modal, for now just close
       this.closeDeleteModal();
     }
+  },
+
+  async handleMessageFeedback(messageElement, messageId, feedbackType) {
+    console.log('[ChatApp] handleMessageFeedback: messageId=%s, feedbackType=%s, currentConversationId=%s',
+                messageId, feedbackType, this.currentConversationId);
+    if (!this.currentConversationId) {
+      console.warn('[ChatApp] handleMessageFeedback: No currentConversationId, aborting');
+      return;
+    }
+
+    const conversationId = this.currentConversationId;
+    const cacheKey = `${conversationId}:${messageId}`;
+
+    try {
+      const result = await this.submitMessageFeedback(conversationId, messageId, feedbackType);
+      if (result) {
+        this.messageFeedbackCache[cacheKey] = result.feedback_type;
+        this.updateMessageFeedbackUI(messageElement, result.feedback_type);
+        console.log('[ChatApp] handleMessageFeedback: UI updated for messageId=%s', messageId);
+      }
+    } catch (error) {
+      console.error('[ChatApp] Failed to submit feedback:', error);
+      this.showToast('Failed to submit feedback. Please try again.', 'error');
+    }
+  },
+
+  updateMessageFeedbackUI(messageElement, feedbackType) {
+    const thumbsUp = messageElement.querySelector('.feedback-btn[data-feedback="positive"]');
+    const thumbsDown = messageElement.querySelector('.feedback-btn[data-feedback="negative"]');
+    if (thumbsUp) thumbsUp.classList.toggle('active', feedbackType === 'positive');
+    if (thumbsDown) thumbsDown.classList.toggle('active', feedbackType === 'negative');
+  },
+
+  async loadMessageFeedbackForConversation(conversationId) {
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+
+    const assistantMessages = container.querySelectorAll('.message-assistant[data-message-id]');
+    for (const msgEl of assistantMessages) {
+      const messageId = msgEl.dataset.messageId;
+      const cacheKey = `${conversationId}:${messageId}`;
+      let feedbackType = this.messageFeedbackCache[cacheKey];
+
+      if (!feedbackType) {
+        const feedback = await this.getMessageFeedback(conversationId, messageId);
+        if (feedback) {
+          feedbackType = feedback.feedback_type;
+          this.messageFeedbackCache[cacheKey] = feedbackType;
+        }
+      }
+
+      if (feedbackType) {
+        this.updateMessageFeedbackUI(msgEl, feedbackType);
+      }
+    }
+  },
+
+  updateEndChatButtonVisibility() {
+    const endChatBtn = document.getElementById('endChatBtn');
+    if (endChatBtn) {
+      if (this.currentConversationId) {
+        endChatBtn.style.display = 'inline-flex';
+      } else {
+        endChatBtn.style.display = 'none';
+      }
+    }
+  },
+
+  openRatingModal() {
+    if (!this.currentConversationId) return;
+
+    const modal = document.getElementById('ratingModal');
+    const submitBtn = document.getElementById('submitRatingBtn');
+    const starButtons = modal?.querySelectorAll('.star-btn');
+    const hint = document.getElementById('ratingHint');
+
+    if (modal && submitBtn) {
+      this.resetRatingModal();
+      modal.classList.add('active');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+      this.ratingModalShown = true;
+
+      if (starButtons) {
+        starButtons.forEach(btn => btn.focus());
+      }
+    }
+  },
+
+  closeRatingModal() {
+    const modal = document.getElementById('ratingModal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+    this.ratingModalShown = false;
+    // Reset navigation flags if modal is closed without completing
+    if (this.pendingNavigation) {
+      this.pendingNavigation = false;
+      this.ratingInProgress = false;
+    }
+  },
+
+  resetRatingModal() {
+    const starButtons = document.querySelectorAll('#ratingModal .star-btn');
+    const submitBtn = document.getElementById('submitRatingBtn');
+    const hint = document.getElementById('ratingHint');
+
+    starButtons.forEach(btn => {
+      btn.classList.remove('selected');
+      btn.setAttribute('aria-checked', 'false');
+    });
+    if (submitBtn) submitBtn.disabled = true;
+    if (hint) hint.textContent = 'Tap a star to rate';
+    this.selectedRating = 0;
+  },
+
+  selectStarRating(rating) {
+    this.selectedRating = rating;
+    const starButtons = document.querySelectorAll('#ratingModal .star-btn');
+    const submitBtn = document.getElementById('submitRatingBtn');
+    const hint = document.getElementById('ratingHint');
+
+    starButtons.forEach(btn => {
+      const btnRating = parseInt(btn.dataset.rating, 10);
+      if (btnRating <= rating) {
+        btn.classList.add('selected');
+        btn.setAttribute('aria-checked', 'true');
+      } else {
+        btn.classList.remove('selected');
+        btn.setAttribute('aria-checked', 'false');
+      }
+    });
+
+    if (submitBtn) submitBtn.disabled = false;
+    if (hint) hint.textContent = `${rating} star${rating > 1 ? 's' : ''} selected`;
+  },
+
+  previewStarRating(rating) {
+    const starButtons = document.querySelectorAll('#ratingModal .star-btn');
+    starButtons.forEach(btn => {
+      const btnRating = parseInt(btn.dataset.rating, 10);
+      if (btnRating <= rating) {
+        btn.classList.add('preview');
+      } else {
+        btn.classList.remove('preview');
+      }
+    });
+  },
+
+  clearStarRatingPreview() {
+    const starButtons = document.querySelectorAll('#ratingModal .star-btn');
+    starButtons.forEach(btn => {
+      btn.classList.remove('preview');
+    });
+  },
+
+  async submitRating() {
+    if (!this.currentConversationId || !this.selectedRating) return;
+
+    const submitBtn = document.getElementById('submitRatingBtn');
+    const conversationId = this.currentConversationId;
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+    }
+
+    try {
+      const result = await this.submitConversationRating(conversationId, this.selectedRating);
+      if (result) {
+        this.showToast('Thank you for your rating!', 'success');
+        this.closeRatingModal();
+        // Navigate to main website after successful rating submission
+        if (this.pendingNavigation) {
+          this.navigateToMainWebsite();
+        }
+      }
+    } catch (error) {
+      console.error('Failed to submit rating:', error);
+      this.showToast(error.message || 'Failed to submit rating. Please try again.', 'error');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit';
+      }
+    } finally {
+      this.ratingInProgress = false;
+    }
+  },
+
+  async skipRating() {
+    if (!this.currentConversationId) return;
+
+    const skipBtn = document.getElementById('skipRatingBtn');
+    const conversationId = this.currentConversationId;
+
+    if (skipBtn) {
+      skipBtn.disabled = true;
+      skipBtn.textContent = 'Skipping...';
+    }
+
+    try {
+      await this.dismissConversationRating(conversationId);
+      this.closeRatingModal();
+      // Navigate to main website after successful skip
+      if (this.pendingNavigation) {
+        this.navigateToMainWebsite();
+      }
+    } catch (error) {
+      console.error('Failed to dismiss rating:', error);
+      this.showToast(error.message || 'Failed to skip rating. Please try again.', 'error');
+      if (skipBtn) {
+        skipBtn.disabled = false;
+        skipBtn.textContent = 'Skip';
+      }
+    } finally {
+      this.ratingInProgress = false;
+    }
+  },
+
+  async checkAndShowRatingPrompt() {
+    if (!this.currentConversationId || this.ratingModalShown) return;
+
+    const status = await this.getConversationRatingStatus(this.currentConversationId);
+    if (!status.rated) {
+      this.openRatingModal();
+    }
+  },
+
+  /**
+   * Centralized function to handle end chat and rating flow.
+   * Used by both End Chat button and MediTrust logo click.
+   * Always opens rating modal, then redirects to index.html after submit/skip.
+   */
+  async endChatAndRate() {
+    if (!this.currentConversationId) return;
+    if (this.ratingInProgress || this.pendingNavigation) return;
+
+    this.ratingInProgress = true;
+    this.pendingNavigation = true;
+    this.openRatingModal();
+  },
+
+  /**
+   * Handle MediTrust logo click - always open rating modal then redirect.
+   */
+  async handleBrandLogoClick(e) {
+    if (!this.currentConversationId) {
+      // No active conversation, allow normal navigation to index.html
+      return;
+    }
+
+    // Prevent default navigation
+    e.preventDefault();
+
+    if (this.ratingInProgress || this.pendingNavigation) {
+      // Already handling a rating flow, ignore duplicate clicks
+      return;
+    }
+
+    await this.endChatAndRate();
+  },
+
+  /**
+   * Navigate to main MediTrust website (index.html).
+   */
+  navigateToMainWebsite() {
+    window.location.href = 'index.html';
+  },
+
+  handleBeforeUnload(e) {
+    if (this.currentConversationId && !this.ratingModalShown) {
+      this.checkAndShowRatingPrompt();
+      if (this.ratingModalShown) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+  },
+
+  handlePopState(e) {
+    if (this.currentConversationId && !this.ratingModalShown) {
+      this.checkAndShowRatingPrompt();
+    }
+  },
+
+  showToast(message, type = 'info') {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.className = 'toast-container';
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+
+    let iconSvg = '';
+    if (type === 'success') {
+      iconSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+    } else if (type === 'warning') {
+      iconSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+    } else if (type === 'error') {
+      iconSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+    } else {
+      iconSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+    }
+
+    toast.innerHTML = `${iconSvg}<span>${message}</span>`;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => {
+        if (toast.parentElement) {
+          toast.remove();
+        }
+      }, 300);
+    }, 4000);
   },
 
   showConversationsLoading() {

@@ -14,7 +14,7 @@
   <header class="chat-header">
     <div class="chat-header-content">
       <div class="chat-header-left">
-        <a href="index.html" class="chat-brand-logo" aria-label="MediTrust Home">
+        <a href="index.html" class="chat-brand-logo" id="chatBrandLogo" aria-label="MediTrust Home">
           <div class="brand-icon">
             <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
           </div>
@@ -23,6 +23,10 @@
         <span class="chat-page-title">AI Health Assistant</span>
       </div>
       <div class="chat-header-right">
+        <button type="button" class="btn btn-outline btn-sm btn-icon" id="endChatBtn" aria-label="End conversation and rate" style="display: none;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+          <span class="btn-text">End Chat</span>
+        </button>
         <div class="chat-user-menu">
           <button type="button" class="user-menu-trigger" id="userMenuTrigger" aria-label="User Menu" aria-expanded="false" aria-haspopup="true">
             <div class="user-avatar" id="userAvatar">U</div>
@@ -182,6 +186,30 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="cancelDeleteBtn">Cancel</button>
         <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Chat / Rating Modal -->
+  <div class="modal-overlay" id="ratingModal" role="dialog" aria-modal="true" aria-labelledby="ratingModalTitle" aria-hidden="true">
+    <div class="modal-box modal-box-rating">
+      <header class="modal-header">
+        <h3 id="ratingModalTitle">How was your experience?</h3>
+        <p>Rate your conversation with MediTrust AI Assistant</p>
+      </header>
+      <div class="modal-body">
+        <div class="rating-stars" role="radiogroup" aria-label="Star rating">
+          <button type="button" class="star-btn" data-rating="1" aria-label="1 star" role="radio" aria-checked="false"><svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></button>
+          <button type="button" class="star-btn" data-rating="2" aria-label="2 stars" role="radio" aria-checked="false"><svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></button>
+          <button type="button" class="star-btn" data-rating="3" aria-label="3 stars" role="radio" aria-checked="false"><svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></button>
+          <button type="button" class="star-btn" data-rating="4" aria-label="4 stars" role="radio" aria-checked="false"><svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></button>
+          <button type="button" class="star-btn" data-rating="5" aria-label="5 stars" role="radio" aria-checked="false"><svg width="28" height="28" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></button>
+        </div>
+        <p class="rating-hint" id="ratingHint">Tap a star to rate</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="skipRatingBtn">Skip</button>
+        <button type="button" class="btn btn-primary" id="submitRatingBtn" disabled>Submit</button>
       </div>
     </div>
   </div>
