@@ -49,3 +49,18 @@ backend/data/
 backend/test_download/
 
 \ No newline at end of file
+
+# Local RAG audit and maintenance scripts
+audit_db.py
+backend/reset_mongodb.py
+backend/cleanup_test_docs.py
+backend/cleanup_test_docs2.py
+backend/test_reingest.py
+backend/add_content_hash.py
+backend/add_content_hash_clean.py
+backend/rebuild_faiss.py
+backend/run_verification_tests.py
+backend/sync_mongodb.py
+
+# Local FAISS backup files
+backend/backup_phase1_20261115_204311/
