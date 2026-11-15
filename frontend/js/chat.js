@@ -13,6 +13,7 @@ const ChatApp = {
   editingConversationId: null,
   deletingConversationId: null,
   messageFeedbackCache: {},
+  conversationRatingCache: {},
   ratingModalShown: false,
   ratingInProgress: false,
   pendingNavigation: false,
@@ -574,6 +575,10 @@ const ChatApp = {
   },
 
   async getConversationRatingStatus(conversationId) {
+    if (this.conversationRatingCache[conversationId] !== undefined) {
+      return this.conversationRatingCache[conversationId];
+    }
+
     try {
       const response = await fetch(`${API_BASE}/chat/conversations/${conversationId}/rate`, {
         headers: this.getAuthHeader()
@@ -592,7 +597,9 @@ const ChatApp = {
         throw new Error('Failed to get rating status');
       }
 
-      return await response.json();
+      const status = await response.json();
+      this.conversationRatingCache[conversationId] = status;
+      return status;
     } catch (error) {
       console.error('Failed to get conversation rating status:', error);
       return { rated: false };
@@ -1314,19 +1321,30 @@ const ChatApp = {
     try {
       const result = await this.submitConversationRating(conversationId, this.selectedRating);
       if (result) {
+        this.conversationRatingCache[conversationId] = { rated: true, rating: this.selectedRating };
         this.showToast('Thank you for your rating!', 'success');
         this.closeRatingModal();
-        // Navigate to main website after successful rating submission
         if (this.pendingNavigation) {
           this.navigateToMainWebsite();
         }
       }
     } catch (error) {
       console.error('Failed to submit rating:', error);
-      this.showToast(error.message || 'Failed to submit rating. Please try again.', 'error');
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Submit';
+      const errorMessage = error.message || 'Failed to submit rating. Please try again.';
+      
+      if (errorMessage.includes('already rated') || errorMessage.includes('409')) {
+        this.conversationRatingCache[conversationId] = { rated: true };
+        this.showToast('Conversation already rated.', 'info');
+        this.closeRatingModal();
+        if (this.pendingNavigation) {
+          this.navigateToMainWebsite();
+        }
+      } else {
+        this.showToast(errorMessage, 'error');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit';
+        }
       }
     } finally {
       this.ratingInProgress = false;
@@ -1346,8 +1364,8 @@ const ChatApp = {
 
     try {
       await this.dismissConversationRating(conversationId);
+      this.conversationRatingCache[conversationId] = { rated: true, dismissed: true };
       this.closeRatingModal();
-      // Navigate to main website after successful skip
       if (this.pendingNavigation) {
         this.navigateToMainWebsite();
       }
@@ -1375,11 +1393,17 @@ const ChatApp = {
   /**
    * Centralized function to handle end chat and rating flow.
    * Used by both End Chat button and MediTrust logo click.
-   * Always opens rating modal, then redirects to index.html after submit/skip.
+   * Checks rating status first, only opens modal if not rated, then redirects to index.html after submit/skip.
    */
   async endChatAndRate() {
     if (!this.currentConversationId) return;
     if (this.ratingInProgress || this.pendingNavigation) return;
+
+    const status = await this.getConversationRatingStatus(this.currentConversationId);
+    if (status.rated) {
+      this.navigateToMainWebsite();
+      return;
+    }
 
     this.ratingInProgress = true;
     this.pendingNavigation = true;
