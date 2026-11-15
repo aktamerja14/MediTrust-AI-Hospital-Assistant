@@ -541,8 +541,12 @@ const AdminDocuments = {
       file.type === 'text/plain' ||
       file.name.toLowerCase().endsWith('.txt');
 
-    if (!isPdf && !isTxt) {
-      this.showUploadError('Please select a PDF or TXT file');
+    const isJson =
+      file.type === 'application/json' ||
+      file.name.toLowerCase().endsWith('.json');
+
+    if (!isPdf && !isTxt && !isJson) {
+      this.showUploadError('Please select a PDF, TXT, or JSON file');
       return;
     }
 

@@ -49,7 +49,7 @@ async def get_rag_ingestion_service(
     "/upload",
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload a PDF or TXT document",
+    summary="Upload a PDF, TXT, or JSON document",
     responses={
         201: {"description": "Document uploaded successfully"},
         400: {"model": DocumentErrorResponse, "description": "Invalid file"},
@@ -59,16 +59,17 @@ async def get_rag_ingestion_service(
     },
 )
 async def upload_document(
-    file: Annotated[UploadFile, File(description="PDF or TXT file to upload")],
+    file: Annotated[UploadFile, File(description="PDF, TXT, or JSON file to upload")],
     document_service: Annotated[DocumentService, Depends(get_document_service)],
     current_user: Annotated[UserResponse, Depends(get_current_active_user)],
     _admin: Annotated[None, Depends(require_admin)],
 ) -> DocumentUploadResponse:
     """
-    Upload a PDF or plain text document to the hospital knowledge base.
+    Upload a PDF, plain text, or JSON document to the hospital knowledge base.
 
     - Only admin users can upload documents
-    - File must be a valid PDF (extension, MIME type, signature, structure) or plain text file
+    - File must be a valid PDF (extension, MIME type, signature, structure), plain text file, or JSON file
+    - JSON files must be valid UTF-8 encoded JSON (arrays, objects, or nested structures)
     - Maximum file size: 10 MB (configurable)
     - Empty files are rejected
     - Files are stored with secure server-generated names

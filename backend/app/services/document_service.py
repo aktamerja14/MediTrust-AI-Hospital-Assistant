@@ -20,8 +20,8 @@ def _utc_now() -> datetime:
 
 DOCUMENTS_COLLECTION = "documents"
 PDF_SIGNATURE = b"%PDF"
-ALLOWED_MIME_TYPES = {"application/pdf", "text/plain"}
-ALLOWED_EXTENSIONS = {".pdf", ".txt"}
+ALLOWED_MIME_TYPES = {"application/pdf", "text/plain", "application/json"}
+ALLOWED_EXTENSIONS = {".pdf", ".txt", ".json"}
 
 
 class DocumentServiceError(Exception):
@@ -109,6 +109,26 @@ class DocumentService:
                 raise InvalidFileError("Invalid PDF structure: missing EOF marker")
         except Exception as exc:
             raise InvalidFileError("PDF structure validation failed") from exc
+
+    def _validate_json_content(self, file_content: bytes) -> None:
+        """Validate JSON file content is valid JSON and not empty."""
+        import json
+        try:
+            content_str = file_content.decode("utf-8")
+            parsed = json.loads(content_str)
+            if parsed is None:
+                raise InvalidFileError("JSON content cannot be null")
+            if isinstance(parsed, (dict, list)) and len(parsed) == 0:
+                raise InvalidFileError("JSON file is empty (empty object or array)")
+        except UnicodeDecodeError as exc:
+            raise InvalidFileError("JSON file must be UTF-8 encoded") from exc
+        except json.JSONDecodeError as exc:
+            raise InvalidFileError(f"Invalid JSON syntax: {str(exc)}") from exc
+
+    def _is_json_file(self, filename: str, content_type: Optional[str]) -> bool:
+        """Check if file is a JSON file based on extension or MIME type."""
+        ext = Path(filename).suffix.lower()
+        return ext == ".json" or content_type == "application/json"
 
     def _generate_document_id(self) -> str:
         """Generate unique document ID."""
@@ -218,7 +238,7 @@ class DocumentService:
         uploaded_by: str,
     ) -> dict:
         """
-        Upload and validate a document (PDF or TXT).
+        Upload and validate a document (PDF, TXT, or JSON).
 
         Args:
             file_content: Raw file bytes
@@ -242,6 +262,8 @@ class DocumentService:
         if self._is_pdf_file(filename, content_type):
             self._validate_pdf_signature(file_content)
             self._validate_pdf_structure(file_content)
+        elif self._is_json_file(filename, content_type):
+            self._validate_json_content(file_content)
 
         document_id = self._generate_document_id()
         storage_filename = self._generate_storage_filename(document_id, filename)
@@ -249,11 +271,18 @@ class DocumentService:
         stored_path = None
         try:
             stored_path = await self._store_file(storage_filename, file_content)
+            file_type = content_type
+            if self._is_pdf_file(filename, content_type):
+                file_type = "application/pdf"
+            elif self._is_json_file(filename, content_type):
+                file_type = "application/json"
+            else:
+                file_type = "text/plain"
             metadata = await self._create_metadata(
                 document_id=document_id,
                 original_filename=filename,
                 storage_filename=storage_filename,
-                file_type=content_type or ("application/pdf" if self._is_pdf_file(filename, content_type) else "text/plain"),
+                file_type=file_type,
                 file_size=len(file_content),
                 uploaded_by=uploaded_by,
             )

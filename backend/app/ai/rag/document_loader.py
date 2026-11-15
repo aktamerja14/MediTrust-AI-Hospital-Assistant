@@ -1,10 +1,11 @@
 """Document Loader for RAG Pipeline.
 
-Loads and extracts text from PDF and TXT files.
+Loads and extracts text from PDF, TXT, and JSON files.
 """
+import json
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import pypdf
 
@@ -21,7 +22,7 @@ class DocumentLoaderError(Exception):
 class DocumentLoader:
     """Loads and extracts text from documents."""
 
-    SUPPORTED_EXTENSIONS = {".pdf", ".txt"}
+    SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".json"}
 
     def __init__(self, storage_path: Optional[str] = None):
         self.storage_path = Path(storage_path or settings.DOCUMENT_STORAGE_PATH).resolve()
@@ -46,6 +47,8 @@ class DocumentLoader:
         try:
             if file_path.suffix.lower() == ".pdf":
                 return self._load_pdf(file_path)
+            elif file_path.suffix.lower() == ".json":
+                return self._load_json(file_path)
             else:
                 return self._load_txt(file_path)
         except DocumentLoaderError:
@@ -56,6 +59,68 @@ class DocumentLoader:
 
     def _is_supported(self, file_path: Path) -> bool:
         return file_path.suffix.lower() in self.SUPPORTED_EXTENSIONS
+
+    def _load_json(self, file_path: Path) -> List[dict]:
+        """Load JSON file and convert to readable text suitable for RAG.
+
+        Supports:
+        - JSON arrays of objects (e.g., Q&A pairs)
+        - JSON objects with nested structures
+        - Preserves key-value relationships
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except UnicodeDecodeError:
+            raise DocumentLoaderError("JSON file must be UTF-8 encoded")
+        except json.JSONDecodeError as e:
+            raise DocumentLoaderError(f"Invalid JSON syntax: {str(e)}")
+        except Exception as e:
+            logger.exception("JSON loading failed for %s: %s", file_path.name, e)
+            raise DocumentLoaderError(f"Failed to load JSON: {str(e)}")
+
+        if data is None:
+            raise DocumentLoaderError("JSON content cannot be null")
+
+        # Convert JSON to readable text
+        text_content = self._json_to_text(data, file_path.name)
+
+        if not text_content.strip():
+            raise DocumentLoaderError("JSON file has no extractable content")
+
+        logger.info("Loaded JSON: %s", file_path.name)
+        return [{
+            "content": text_content,
+            "page_number": 1,
+            "metadata": {"source": file_path.name, "page": 1, "file_type": "json"},
+        }]
+
+    def _json_to_text(self, data: Any, source_name: str, prefix: str = "") -> str:
+        """Recursively convert JSON data to readable text preserving key-value relationships."""
+        lines = []
+
+        def _process(value: Any, current_prefix: str = "") -> None:
+            if isinstance(value, dict):
+                for key, val in value.items():
+                    new_prefix = f"{current_prefix}{key}" if current_prefix else key
+                    if isinstance(val, (dict, list)):
+                        _process(val, new_prefix + ": ")
+                    else:
+                        lines.append(f"{new_prefix}: {val}")
+            elif isinstance(value, list):
+                for idx, item in enumerate(value):
+                    if isinstance(item, (dict, list)):
+                        _process(item, f"{current_prefix}[{idx}]: ")
+                    else:
+                        lines.append(f"{current_prefix}[{idx}]: {item}")
+            else:
+                if current_prefix:
+                    lines.append(f"{current_prefix}{value}")
+                else:
+                    lines.append(str(value))
+
+        _process(data, prefix)
+        return "\n".join(lines)
 
     def _load_pdf(self, file_path: Path) -> List[dict]:
         """Extract text from PDF with page numbers."""

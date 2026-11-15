@@ -213,17 +213,60 @@ class FAISSVectorStore(BaseVectorStore):
     def delete_document(self, document_id: str) -> bool:
         """Delete a document by ID.
 
-        Note: FAISS doesn't support true deletion. We mark as deleted
-        and rebuild index on next persist if needed.
-        For now, just remove from metadata tracking.
+        Rebuilds the FAISS index to remove the document's vector.
         """
-        if document_id in self._documents:
-            del self._documents[document_id]
-            if document_id in self._id_to_index:
-                del self._id_to_index[document_id]
-            logger.info("Marked document %s for deletion", document_id)
-            return True
-        return False
+        return self.delete_documents([document_id])
+
+    def delete_documents(self, document_ids: List[str]) -> int:
+        """Delete multiple documents by IDs in a single rebuild.
+
+        Args:
+            document_ids: List of document IDs to delete
+
+        Returns:
+            Number of documents actually deleted
+        """
+        if not document_ids:
+            return 0
+
+        # Filter to only existing documents
+        to_delete = [doc_id for doc_id in document_ids if doc_id in self._documents]
+        if not to_delete:
+            return 0
+
+        # Remove from tracking
+        for doc_id in to_delete:
+            del self._documents[doc_id]
+            if doc_id in self._id_to_index:
+                del self._id_to_index[doc_id]
+
+        # Rebuild index from remaining documents
+        self._rebuild_index()
+        logger.info("Deleted %d documents and rebuilt index", len(to_delete))
+        return len(to_delete)
+
+    def _rebuild_index(self) -> None:
+        """Rebuild FAISS index from current documents."""
+        if not self._documents:
+            self._create_new_index()
+            return
+
+        # Extract vectors and documents in order of id_to_index
+        vectors = []
+        new_documents = {}
+        new_id_to_index = {}
+        for new_idx, (doc_id, old_idx) in enumerate(sorted(self._id_to_index.items(), key=lambda x: x[1])):
+            vec = self._index.reconstruct(old_idx)
+            vectors.append(vec)
+            new_documents[doc_id] = self._documents[doc_id]
+            new_id_to_index[doc_id] = new_idx
+
+        vectors_arr = np.array(vectors, dtype=np.float32)
+        self._create_new_index()
+        self._index.add(vectors_arr)
+        self._documents = new_documents
+        self._id_to_index = new_id_to_index
+        logger.info("Rebuilt FAISS index with %d vectors", len(vectors))
 
     def persist(self) -> None:
         """Persist the index to disk."""

@@ -3,6 +3,7 @@
 Processes uploaded documents: loads, splits, embeds, and stores in vector database.
 Tracks processing status in MongoDB.
 """
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -18,12 +19,12 @@ from app.ai.rag.text_splitter import TextSplitter, TextChunk
 from app.ai.vectorstore.base import VectorDocument
 from app.ai.vectorstore.factory import VectorStoreFactory
 from app.core.config import settings
+from app.services.document_service import DocumentService
 
 
 def _utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
     return datetime.now(timezone.utc)
-from app.services.document_service import DocumentService
 
 logger = logging.getLogger("meditrust.services.rag_ingestion")
 
@@ -35,6 +36,12 @@ STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+
+
+def _content_hash(content: str) -> str:
+    """Generate stable SHA-256 hash of normalized chunk content."""
+    normalized = content.strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -81,13 +88,18 @@ class RAGIngestionService:
             await self.chunks_collection.create_index("document_id")
             await self.chunks_collection.create_index("chunk_id", unique=True)
             await self.chunks_collection.create_index("processing_status")
+            await self.chunks_collection.create_index("content_hash")
             logger.info("RAG ingestion indexes created")
         except PyMongoError as e:
             logger.error("Failed to create RAG indexes: %s", e)
             raise RAGIngestionError("Failed to create indexes") from e
 
+    async def _find_existing_by_content_hash(self, content_hash: str) -> Optional[dict]:
+        """Find existing chunk with matching content hash."""
+        return await self.chunks_collection.find_one({"content_hash": content_hash})
+
     async def ingest_document(self, document_id: str) -> IngestionResult:
-        """Ingest a document into the RAG pipeline.
+        """Ingest a document into the RAG pipeline with content-based deduplication.
 
         Args:
             document_id: Document ID from document service
@@ -100,7 +112,7 @@ class RAGIngestionService:
         if not doc_meta:
             raise RAGIngestionError(f"Document {document_id} not found")
 
-        # Check if already processed
+        # Check if already processed (by document_id)
         existing_chunks = await self.chunks_collection.count_documents(
             {"document_id": document_id}
         )
@@ -145,10 +157,42 @@ class RAGIngestionService:
             chunk_texts = [chunk.content for chunk in all_chunks]
             embeddings = self.embedding_provider.embed_texts(chunk_texts)
 
-            # Create vector documents
+            # Create vector documents with content-based deduplication
             vector_docs = []
+            chunks_created = 0
+            chunks_skipped = 0
+
             for i, (chunk, embedding) in enumerate(zip(all_chunks, embeddings)):
                 chunk_id = f"{document_id}_chunk_{i}"
+                content_hash = _content_hash(chunk.content)
+
+                # Check for existing content by hash
+                existing = await self._find_existing_by_content_hash(content_hash)
+                if existing:
+                    logger.info(
+                        "Chunk content already exists (hash=%s), skipping vector insertion. "
+                        "Existing chunk_id=%s, document_id=%s",
+                        content_hash[:16], existing["chunk_id"], existing["document_id"]
+                    )
+                    chunks_skipped += 1
+                    # Still store chunk metadata linking to this document
+                    chunk_meta = {
+                        "chunk_id": chunk_id,
+                        "document_id": document_id,
+                        "content": chunk.content,
+                        "content_hash": content_hash,
+                        "chunk_index": i,
+                        "page_number": chunk.metadata.get("page_number"),
+                        "metadata": chunk.metadata,
+                        "embedding_model": settings.EMBEDDING_MODEL,
+                        "processing_status": STATUS_COMPLETED,
+                        "created_at": _utc_now(),
+                        "deduplicated_from": existing["chunk_id"],
+                    }
+                    await self.chunks_collection.insert_one(chunk_meta)
+                    continue
+
+                # New unique content - add to vector store
                 vector_doc = VectorDocument(
                     id=chunk_id,
                     content=chunk.content,
@@ -156,12 +200,14 @@ class RAGIngestionService:
                     metadata=chunk.metadata,
                 )
                 vector_docs.append(vector_doc)
+                chunks_created += 1
 
                 # Store chunk metadata in MongoDB
                 chunk_meta = {
                     "chunk_id": chunk_id,
                     "document_id": document_id,
                     "content": chunk.content,
+                    "content_hash": content_hash,
                     "chunk_index": i,
                     "page_number": chunk.metadata.get("page_number"),
                     "metadata": chunk.metadata,
@@ -171,17 +217,24 @@ class RAGIngestionService:
                 }
                 await self.chunks_collection.insert_one(chunk_meta)
 
-            # Add to vector store
-            self.vector_store.add_documents(vector_docs)
-            self.vector_store.persist()
+            # Add new unique vectors to vector store
+            if vector_docs:
+                self.vector_store.add_documents(vector_docs)
+                self.vector_store.persist()
+                logger.info("Added %d new unique vectors to vector store", len(vector_docs))
+            else:
+                logger.info("No new unique vectors to add (all %d chunks were duplicates)", chunks_skipped)
 
             # Update document processing status
             await self._update_processing_status(document_id, STATUS_COMPLETED)
 
-            logger.info("Successfully ingested document %s: %d chunks", document_id, len(vector_docs))
+            logger.info(
+                "Successfully ingested document %s: %d new chunks, %d skipped as duplicates",
+                document_id, chunks_created, chunks_skipped
+            )
             return IngestionResult(
                 document_id=document_id,
-                chunks_created=len(vector_docs),
+                chunks_created=chunks_created,
                 status=STATUS_COMPLETED,
             )
 
@@ -233,10 +286,10 @@ class RAGIngestionService:
         async for chunk in self.chunks_collection.find({"document_id": document_id}):
             chunk_ids.append(chunk["chunk_id"])
 
-        # Delete from vector store
-        for chunk_id in chunk_ids:
-            self.vector_store.delete_document(chunk_id)
-        self.vector_store.persist()
+        # Delete from vector store (batch)
+        if chunk_ids:
+            self.vector_store.delete_documents(chunk_ids)
+            self.vector_store.persist()
 
         # Delete from MongoDB
         result = await self.chunks_collection.delete_many({"document_id": document_id})

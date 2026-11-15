@@ -47,6 +47,44 @@ startxref
 # Valid TXT content
 VALID_TXT_CONTENT = b"This is a valid plain text document for testing."
 
+# Valid JSON content - array of objects
+VALID_JSON_ARRAY_CONTENT = b'''[
+  {"question": "What are visiting hours?", "answer": "9 AM to 6 PM"},
+  {"question": "Where is emergency?", "answer": "Ground floor"}
+]'''
+
+# Valid JSON content - object
+VALID_JSON_OBJECT_CONTENT = b'''{
+  "hospital_name": "MediTrust",
+  "departments": ["Cardiology", "Neurology"],
+  "visiting_hours": "9 AM to 6 PM"
+}'''
+
+# Valid JSON content - nested
+VALID_JSON_NESTED_CONTENT = b'''{
+  "hospital": {
+    "name": "MediTrust",
+    "services": {
+      "emergency": "24/7",
+      "pharmacy": "Available"
+    }
+  }
+}'''
+
+# Valid JSON content - Gujarati/English
+VALID_JSON_GUJARATI_CONTENT = '''{
+  "hospital": "મેડીટ્રસ્ટ",
+  "departments": ["કાર્ડિઓલૉજી", "ન્યુરોલૉજી"],
+  "visiting_hours": "સવારે 9 થી સાંજ 6"
+}'''.encode("utf-8")
+
+# Invalid JSON content (malformed)
+INVALID_JSON_CONTENT = b'{"key": "value",}'
+
+# Empty JSON content
+EMPTY_JSON_ARRAY_CONTENT = b"[]"
+EMPTY_JSON_OBJECT_CONTENT = b"{}"
+
 # Invalid PDF content (wrong signature)
 INVALID_PDF_CONTENT = b"This is not a PDF file"
 
@@ -100,6 +138,148 @@ class TestDocumentUpload:
         assert data["file_size"] == len(VALID_TXT_CONTENT)
         assert data["processing_status"] == "uploaded"
         assert "upload_timestamp" in data
+
+    @pytest.mark.asyncio
+    async def test_admin_can_upload_valid_json_array(self, client, test_db):
+        """Test admin can upload a valid JSON array file."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("qa.json", BytesIO(VALID_JSON_ARRAY_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "document_id" in data
+        assert data["document_id"].startswith("doc_")
+        assert data["original_filename"] == "qa.json"
+        assert data["file_size"] == len(VALID_JSON_ARRAY_CONTENT)
+        assert data["processing_status"] == "uploaded"
+        assert "upload_timestamp" in data
+
+    @pytest.mark.asyncio
+    async def test_admin_can_upload_valid_json_object(self, client, test_db):
+        """Test admin can upload a valid JSON object file."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("hospital.json", BytesIO(VALID_JSON_OBJECT_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "document_id" in data
+        assert data["document_id"].startswith("doc_")
+        assert data["original_filename"] == "hospital.json"
+        assert data["file_size"] == len(VALID_JSON_OBJECT_CONTENT)
+        assert data["processing_status"] == "uploaded"
+        assert "upload_timestamp" in data
+
+    @pytest.mark.asyncio
+    async def test_admin_can_upload_valid_json_nested(self, client, test_db):
+        """Test admin can upload a valid nested JSON file."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("nested.json", BytesIO(VALID_JSON_NESTED_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "document_id" in data
+        assert data["document_id"].startswith("doc_")
+        assert data["original_filename"] == "nested.json"
+        assert data["file_size"] == len(VALID_JSON_NESTED_CONTENT)
+        assert data["processing_status"] == "uploaded"
+        assert "upload_timestamp" in data
+
+    @pytest.mark.asyncio
+    async def test_admin_can_upload_json_with_gujarati(self, client, test_db):
+        """Test admin can upload JSON with Gujarati and English text."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("gujarati.json", BytesIO(VALID_JSON_GUJARATI_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert "document_id" in data
+        assert data["document_id"].startswith("doc_")
+        assert data["original_filename"] == "gujarati.json"
+        assert data["file_size"] == len(VALID_JSON_GUJARATI_CONTENT)
+        assert data["processing_status"] == "uploaded"
+        assert "upload_timestamp" in data
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_rejected(self, client, test_db):
+        """Test malformed JSON is rejected."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("bad.json", BytesIO(INVALID_JSON_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "json" in data["detail"].lower() or "syntax" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_empty_json_array_rejected(self, client, test_db):
+        """Test empty JSON array is rejected."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("empty.json", BytesIO(EMPTY_JSON_ARRAY_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "empty" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_empty_json_object_rejected(self, client, test_db):
+        """Test empty JSON object is rejected."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        files = {"file": ("empty.json", BytesIO(EMPTY_JSON_OBJECT_CONTENT), "application/json")}
+        response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "empty" in data["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_patient_upload_returns_403(self, client, test_db):
@@ -457,6 +637,165 @@ class TestDocumentDelete:
         assert response.status_code in (400, 404)
         data = response.json()
         assert "detail" in data
+
+
+class TestJSONDocumentIngestion:
+    """Tests for JSON document ingestion into RAG pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_valid_json_array(self, client, test_db):
+        """Test ingesting a valid JSON array document."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Upload JSON array
+        files = {"file": ("qa.json", BytesIO(VALID_JSON_ARRAY_CONTENT), "application/json")}
+        upload_response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+        assert upload_response.status_code == 201
+        document_id = upload_response.json()["document_id"]
+
+        # Ingest the document
+        ingest_response = await client.post(
+            f"/api/v1/admin/documents/{document_id}/ingest",
+            headers=headers
+        )
+        assert ingest_response.status_code == 200
+        data = ingest_response.json()
+        assert data["status"] == "completed"
+        assert data["chunks_created"] > 0
+        assert data["document_id"] == document_id
+
+        # Verify chunks stored in MongoDB
+        from app.services.rag_ingestion import RAGIngestionService
+        ingestion_service = RAGIngestionService(test_db)
+        await ingestion_service.create_indexes()
+        status = await ingestion_service.get_ingestion_status(document_id)
+        assert status is not None
+        assert status["chunks_count"] > 0
+        assert status["processing_status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_ingest_valid_json_object(self, client, test_db):
+        """Test ingesting a valid JSON object document."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Upload JSON object
+        files = {"file": ("hospital.json", BytesIO(VALID_JSON_OBJECT_CONTENT), "application/json")}
+        upload_response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+        assert upload_response.status_code == 201
+        document_id = upload_response.json()["document_id"]
+
+        # Ingest the document
+        ingest_response = await client.post(
+            f"/api/v1/admin/documents/{document_id}/ingest",
+            headers=headers
+        )
+        assert ingest_response.status_code == 200
+        data = ingest_response.json()
+        assert data["status"] == "completed"
+        assert data["chunks_created"] > 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_json_with_gujarati(self, client, test_db):
+        """Test ingesting JSON with Gujarati text."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Upload JSON with Gujarati
+        files = {"file": ("gujarati.json", BytesIO(VALID_JSON_GUJARATI_CONTENT), "application/json")}
+        upload_response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+        assert upload_response.status_code == 201
+        document_id = upload_response.json()["document_id"]
+
+        # Ingest the document
+        ingest_response = await client.post(
+            f"/api/v1/admin/documents/{document_id}/ingest",
+            headers=headers
+        )
+        assert ingest_response.status_code == 200
+        data = ingest_response.json()
+        assert data["status"] == "completed"
+        assert data["chunks_created"] > 0
+
+
+class TestFullWorkflow:
+    """Tests for complete upload-to-chatbot workflow with JSON documents."""
+
+    @pytest.mark.asyncio
+    async def test_json_upload_ingest_chat_workflow(self, client, test_db):
+        """Test complete workflow: upload JSON -> ingest -> verify chunks -> chat works."""
+        auth_service = AuthService(test_db)
+        user_data = UserCreate(email="admin@test.com", password="adminPass123")
+        admin_user = await auth_service.create_user(user_data, role="admin")
+
+        token = create_token(admin_user.id, "admin")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # JSON content with specific Q&A
+        json_content = b'''[
+          {"question": "What are MediTrust visiting hours?", "answer": "MediTrust visiting hours are 9 AM to 6 PM daily"},
+          {"question": "Where is the emergency department?", "answer": "Emergency department is on the ground floor, available 24/7"},
+          {"question": "Does MediTrust have a pharmacy?", "answer": "Yes, MediTrust has an in-house pharmacy available during hospital hours"}
+        ]'''
+
+        # 1. Upload JSON document
+        files = {"file": ("faq.json", BytesIO(json_content), "application/json")}
+        upload_response = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+        assert upload_response.status_code == 201
+        document_id = upload_response.json()["document_id"]
+
+        # 2. Ingest the document
+        ingest_response = await client.post(
+            f"/api/v1/admin/documents/{document_id}/ingest",
+            headers=headers
+        )
+        assert ingest_response.status_code == 200
+        data = ingest_response.json()
+        assert data["status"] == "completed"
+        assert data["chunks_created"] > 0
+
+        # 3. Verify chunks are stored in vector database (MongoDB)
+        from app.services.rag_ingestion import RAGIngestionService
+        ingestion_service = RAGIngestionService(test_db)
+        await ingestion_service.create_indexes()
+        status = await ingestion_service.get_ingestion_status(document_id)
+        assert status is not None
+        assert status["chunks_count"] > 0
+        assert status["processing_status"] == "completed"
+
+        # 4. Chat endpoint works (uses mock LLM in tests)
+        patient_user_data = UserCreate(email="patient@test.com", password="patientPass123")
+        patient_user = await auth_service.create_user(patient_user_data, role="patient")
+        patient_token = create_token(patient_user.id, "patient")
+        patient_headers = {"Authorization": f"Bearer {patient_token}"}
+
+        chat_response = await client.post("/api/v1/chat/message", json={
+            "message": "Hello, what are the visiting hours?"
+        }, headers=patient_headers)
+
+        assert chat_response.status_code == 200
+        chat_data = chat_response.json()
+        assert "assistant_message" in chat_data
+        assert "content" in chat_data["assistant_message"]
+        assert len(chat_data["assistant_message"]["content"]) > 0
+
+        # 5. Verify existing PDF/TXT upload still works
+        files = {"file": ("test.pdf", BytesIO(VALID_PDF_CONTENT), "application/pdf")}
+        upload_response2 = await client.post("/api/v1/admin/documents/upload", files=files, headers=headers)
+        assert upload_response2.status_code == 201
 
 
 class TestExistingAuthEndpointsStillWork:
