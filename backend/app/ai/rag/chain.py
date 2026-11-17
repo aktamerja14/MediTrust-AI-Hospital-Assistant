@@ -13,6 +13,7 @@ from app.ai.rag.retriever import Retriever, RetrieverError
 from app.ai.rag.prompts import build_rag_prompt, build_no_context_prompt, MEDICAL_DISCLAIMER
 from app.ai.vectorstore.base import SearchResult
 from app.core.config import settings
+from app.database.connection import db_manager
 
 logger = logging.getLogger("meditrust.ai.rag.chain")
 
@@ -24,12 +25,19 @@ class RAGResponse:
     sources: List[Dict[str, Any]]
     has_context: bool
     model: str
+    doctor_recommendations: List[Dict[str, Any]] = None
+    disclaimer: str = ""
 
 
 class RAGChainError(Exception):
     """Exception for RAG chain errors."""
     pass
 
+
+# Minimum similarity score threshold for retrieved chunks
+# Filters out low-relevance results (e.g., symptom-prediction training data)
+# Lowered to 0.3 for local embedding model (all-MiniLM-L6-v2) which produces lower scores
+MIN_SIMILARITY_SCORE = 0.3
 
 # Keywords that indicate medical advice questions (need disclaimer)
 MEDICAL_ADVICE_KEYWORDS = [
@@ -56,6 +64,16 @@ GENERAL_INFO_KEYWORDS = [
     "patient portal", "medical record", "record", "form",
 ]
 
+# Medical specialization keywords for doctor matching
+SPECIALIZATION_KEYWORDS = {
+    "cardiology": ["heart", "cardiac", "cardiology", "chest pain", "blood pressure", "hypertension", "heart attack", "cardiovascular"],
+    "neurology": ["brain", "nerve", "neurology", "neurologist", "headache", "migraine", "seizure", "epilepsy", "stroke", "parkinson", "memory", "numbness", "tingling"],
+    "dermatology": ["skin", "hair", "nail", "dermatology", "dermatologist", "rash", "acne", "eczema", "psoriasis", "allergy", "itching", "mole", "lesion"],
+    "orthopedics": ["bone", "joint", "orthopedic", "orthopedics", "fracture", "arthritis", "knee", "hip", "shoulder", "back pain", "spine", "sports injury", "muscle"],
+    "gynecology": ["pregnancy", "gynecology", "gynecologist", "women", "menstrual", "period", "obstetrics", "prenatal", "maternity", "reproductive", "pcod", "pcos"],
+    "medicine": ["fever", "cold", "cough", "flu", "general", "physician", "internal medicine", "diabetes", "thyroid", "infection", "viral", "bacterial", "fatigue", "weakness"],
+}
+
 
 def _is_medical_advice_question(query: str) -> bool:
     """Determine if a question is asking for medical advice (needs disclaimer)."""
@@ -75,6 +93,109 @@ def _is_medical_advice_question(query: str) -> bool:
     return True
 
 
+def _detect_specialization(query: str) -> List[str]:
+    """Detect relevant medical specializations from the query."""
+    query_lower = query.lower()
+    matched_specializations = []
+    
+    for spec, keywords in SPECIALIZATION_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in query_lower:
+                matched_specializations.append(spec)
+                break
+    
+    # Default to general medicine if no specific specialization detected
+    if not matched_specializations:
+        matched_specializations.append("medicine")
+    
+    return matched_specializations
+
+
+async def _get_doctor_recommendations(specializations: List[str], limit: int = 2, db=None) -> List[Dict[str, Any]]:
+    """Fetch doctor recommendations from database based on specializations."""
+    # Use provided db or fall back to db_manager
+    database = db if db is not None else db_manager.db
+    if database is None:
+        return []
+    
+    recommendations = []
+    seen_doctor_ids = set()
+    
+    for spec in specializations:
+        # Build query for matching doctors
+        spec_query = {"$or": []}
+        if spec == "cardiology":
+            spec_query["$or"].append({"specialization": {"$regex": "cardiolog", "$options": "i"}})
+        elif spec == "neurology":
+            spec_query["$or"].append({"specialization": {"$regex": "neurolog", "$options": "i"}})
+        elif spec == "dermatology":
+            spec_query["$or"].append({"specialization": {"$regex": "dermatolog", "$options": "i"}})
+        elif spec == "orthopedics":
+            spec_query["$or"].append({"specialization": {"$regex": "orthoped", "$options": "i"}})
+        elif spec == "gynecology":
+            spec_query["$or"].append({"specialization": {"$regex": "gynecolog", "$options": "i"}})
+        elif spec == "medicine":
+            spec_query["$or"].append({"specialization": {"$regex": "general physician|general medicine", "$options": "i"}})
+        
+        if not spec_query["$or"]:
+            continue
+            
+        cursor = database["doctors"].find(spec_query).limit(limit)
+        async for doc in cursor:
+            if doc["doctor_id"] not in seen_doctor_ids:
+                seen_doctor_ids.add(doc["doctor_id"])
+                
+                # Determine match reason
+                match_reasons = {
+                    "cardiology": "Cardiologist for heart-related concerns",
+                    "neurology": "Neurologist for neurological concerns and nerve-related symptoms",
+                    "dermatology": "Dermatologist for skin, hair, and nail concerns",
+                    "orthopedics": "Orthopedics specialist for bone and joint concerns",
+                    "gynecology": "Gynecologist for women's health and pregnancy concerns",
+                    "medicine": "General physician for common illnesses and fever",
+                }
+                
+                recommendations.append({
+                    "doctor_id": doc["doctor_id"],
+                    "name": doc["name"],
+                    "qualifications": doc["qualifications"],
+                    "specialization": doc["specialization"],
+                    "experience_years": doc["experience_years"],
+                    "photo_path": doc["photo_path"],
+                    "phone": doc["phone"],
+                    "available_from": doc["available_from"],
+                    "available_to": doc["available_to"],
+                    "match_reason": match_reasons.get(spec, f"Specialist in {doc['specialization']}"),
+                })
+                
+                if len(recommendations) >= limit:
+                    break
+        
+        if len(recommendations) >= limit:
+            break
+    
+    # If no recommendations found, fall back to general physician
+    if not recommendations:
+        general_doc = await db_manager.db["doctors"].find_one(
+            {"specialization": {"$regex": "general physician|general medicine", "$options": "i"}}
+        )
+        if general_doc:
+            recommendations.append({
+                "doctor_id": general_doc["doctor_id"],
+                "name": general_doc["name"],
+                "qualifications": general_doc["qualifications"],
+                "specialization": general_doc["specialization"],
+                "experience_years": general_doc["experience_years"],
+                "photo_path": general_doc["photo_path"],
+                "phone": general_doc["phone"],
+                "available_from": general_doc["available_from"],
+                "available_to": general_doc["available_to"],
+                "match_reason": "General physician for general medical questions",
+            })
+    
+    return recommendations
+
+
 class RAGChain:
     """End-to-end RAG pipeline."""
 
@@ -92,11 +213,12 @@ class RAGChain:
     def retriever(self):
         return self._retriever
 
-    def generate(
+    async def generate(
         self,
         query: str,
         conversation_history: Optional[List[dict]] = None,
         top_k: Optional[int] = None,
+        db=None,
     ) -> RAGResponse:
         """Generate a grounded answer for the query.
 
@@ -104,13 +226,17 @@ class RAGChain:
             query: User's question
             conversation_history: Previous messages in conversation
             top_k: Number of chunks to retrieve
+            db: Optional database instance for doctor recommendations (uses default if not provided)
 
         Returns:
             RAGResponse with answer, sources, and metadata
         """
-        # Retrieve relevant context
+        # Check if this is a medical question
+        is_medical = _is_medical_advice_question(query)
+        
+        # Retrieve relevant context with minimum similarity threshold
         try:
-            results = self.retriever.retrieve(query, top_k=top_k)
+            results = self.retriever.retrieve_with_scores(query, top_k=top_k, min_score=MIN_SIMILARITY_SCORE)
         except RetrieverError as e:
             logger.error("Retrieval failed: %s", e)
             raise RAGChainError(f"Retrieval failed: {str(e)}")
@@ -119,14 +245,22 @@ class RAGChain:
         if not results:
             system_prompt, user_prompt = build_no_context_prompt(query)
             answer = self._call_llm(system_prompt, user_prompt)
-            # Add disclaimer for no-context responses (safety first)
-            if _is_medical_advice_question(query):
-                answer = answer + MEDICAL_DISCLAIMER
+            
+            # Get doctor recommendations for medical questions
+            doctor_recommendations = []
+            disclaimer = ""
+            if is_medical:
+                specializations = _detect_specialization(query)
+                doctor_recommendations = await _get_doctor_recommendations(specializations, db=db)
+                disclaimer = MEDICAL_DISCLAIMER
+            
             return RAGResponse(
                 answer=answer,
                 sources=[],
                 has_context=False,
                 model=self.llm_provider.model,
+                doctor_recommendations=doctor_recommendations,
+                disclaimer=disclaimer,
             )
 
         # Build prompt with context
@@ -138,10 +272,6 @@ class RAGChain:
         except Exception as e:
             logger.exception("LLM generation failed: %s", e)
             raise RAGChainError(f"Generation failed: {str(e)}")
-
-        # Conditionally add medical disclaimer
-        if _is_medical_advice_question(query):
-            answer = answer + MEDICAL_DISCLAIMER
 
         # Format sources (concise)
         sources = []
@@ -156,11 +286,21 @@ class RAGChain:
                 "content_preview": doc.content[:200] + "..." if len(doc.content) > 200 else doc.content,
             })
 
+        # Get doctor recommendations for medical questions
+        doctor_recommendations = []
+        disclaimer = ""
+        if is_medical:
+            specializations = _detect_specialization(query)
+            doctor_recommendations = await _get_doctor_recommendations(specializations, db=db)
+            disclaimer = MEDICAL_DISCLAIMER
+
         return RAGResponse(
             answer=answer,
             sources=sources,
             has_context=True,
             model=self.llm_provider.model,
+            doctor_recommendations=doctor_recommendations,
+            disclaimer=disclaimer,
         )
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
