@@ -28,6 +28,11 @@ from app.ai.providers.base import (
     LLMModelNotFoundError,
     LLMProviderUnavailableError,
 )
+from app.ai.tracing.config import (
+    groq_llm_process_inputs,
+    groq_llm_process_outputs,
+)
+from langsmith import traceable
 
 logger = logging.getLogger("meditrust.ai.providers.groq")
 
@@ -58,6 +63,12 @@ class GroqProvider(BaseLLMProvider):
     def provider_name(self) -> str:
         return "groq"
 
+    @traceable(
+        name="groq_generate_response",
+        run_type="llm",
+        process_inputs=groq_llm_process_inputs,
+        process_outputs=groq_llm_process_outputs,
+    )
     def generate_response(
         self,
         messages: List[LLMMessage],

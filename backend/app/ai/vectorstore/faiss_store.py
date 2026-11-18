@@ -20,6 +20,11 @@ from app.ai.vectorstore.base import (
     SearchResult,
     VectorStoreError,
 )
+from app.ai.tracing.config import (
+    faiss_search_process_inputs,
+    faiss_search_process_outputs,
+)
+from langsmith import traceable
 
 logger = logging.getLogger("meditrust.ai.vectorstore.faiss")
 
@@ -154,6 +159,12 @@ class FAISSVectorStore(BaseVectorStore):
 
         logger.info("Added %d documents to FAISS index (total: %d)", len(documents), self._index.ntotal)
 
+    @traceable(
+        name="faiss_search",
+        run_type="retriever",
+        process_inputs=faiss_search_process_inputs,
+        process_outputs=faiss_search_process_outputs,
+    )
     def search(
         self,
         query_embedding: List[float],

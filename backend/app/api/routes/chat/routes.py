@@ -1,9 +1,10 @@
 """AI Chatbot API routes - accessible by both patients and admins."""
 import logging
+import uuid
 from typing import Annotated, Optional, List
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from pymongo.asynchronous.database import AsyncDatabase
 from bson import ObjectId
@@ -35,12 +36,88 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _generate_feedback_uuid() -> str:
+    """Generate a stable UUID for LangSmith feedback tracking."""
+    return str(uuid.uuid4())
+
+
+async def _sync_message_feedback_to_langsmith(
+    run_id: Optional[str],
+    trace_id: Optional[str],
+    score: float,
+    feedback_id: str,
+) -> None:
+    """
+    Background task to sync message feedback to LangSmith.
+
+    Fire-and-forget: MongoDB is source of truth. LangSmith failures are logged
+    but never affect the API response or MongoDB feedback.
+
+    Privacy: Only sends run_id/trace_id, fixed key, numeric score, feedback UUID.
+    Never sends user IDs, message IDs, comments, queries, answers, or medical data.
+    """
+    # Skip if no run_id (tracing was disabled when message was created)
+    if not run_id:
+        logger.debug("Skipping LangSmith sync: no run_id provided")
+        return
+
+    try:
+        from langsmith import Client
+        from langsmith.schemas import FeedbackSourceType
+
+        client = Client()
+        client.create_feedback(
+            run_id=run_id,
+            trace_id=trace_id,
+            key="user_feedback",
+            score=score,
+            feedback_id=feedback_id,
+            feedback_source_type=FeedbackSourceType.API,
+        )
+        logger.info("LangSmith message feedback synced: run_id=%s, score=%s", run_id, score)
+    except Exception as e:
+        logger.warning("LangSmith message feedback sync failed: %s", type(e).__name__)
+
+
+async def _sync_conversation_rating_to_langsmith(
+    trace_id: str,
+    score: float,
+    feedback_id: str,
+) -> None:
+    """
+    Background task to sync conversation rating to LangSmith.
+
+    Uses root trace_id (not child runs). MongoDB is source of truth.
+    LangSmith failures are logged but never affect the API response or MongoDB rating.
+
+    Privacy: Only sends trace_id, fixed key, normalized score, feedback UUID.
+    Never sends user IDs, conversation IDs, comments, or medical data.
+    """
+    try:
+        from langsmith import Client
+        from langsmith.schemas import FeedbackSourceType
+
+        client = Client()
+        client.create_feedback(
+            trace_id=trace_id,
+            key="conversation_rating",
+            score=score,
+            feedback_id=feedback_id,
+            feedback_source_type=FeedbackSourceType.API,
+        )
+        logger.info("LangSmith conversation rating synced: trace_id=%s, score=%s", trace_id, score)
+    except Exception as e:
+        logger.warning("LangSmith conversation rating sync failed: %s", type(e).__name__)
+
+
 class ChatMessage(BaseModel):
     """Chat message structure."""
     id: str = Field(..., description="Message unique identifier")
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(default_factory=_utc_now, description="Message timestamp")
+    langsmith_run_id: Optional[str] = Field(default=None, description="LangSmith run ID for tracing")
+    langsmith_trace_id: Optional[str] = Field(default=None, description="LangSmith trace ID for tracing")
 
 
 class SourceReference(BaseModel):
@@ -232,6 +309,8 @@ async def send_message(
         sources = [SourceReference(**s) for s in rag_response.sources]
         has_context = rag_response.has_context
         model = rag_response.model
+        langsmith_run_id = rag_response.langsmith_run_id
+        langsmith_trace_id = rag_response.langsmith_trace_id
     except RAGChainError as e:
         logger.error("RAG chain error: %s", e)
         # Fallback response on RAG failure
@@ -246,6 +325,8 @@ async def send_message(
         sources = []
         has_context = False
         model = ""
+        langsmith_run_id = None
+        langsmith_trace_id = None
     except Exception as e:
         logger.exception("Unexpected error in chat: %s", e)
         raise HTTPException(
@@ -253,7 +334,13 @@ async def send_message(
             detail="Failed to generate response"
         )
 
-    assistant_message = ChatMessage(id=str(ObjectId()), role="assistant", content=assistant_content)
+    assistant_message = ChatMessage(
+        id=str(ObjectId()),
+        role="assistant",
+        content=assistant_content,
+        langsmith_run_id=langsmith_run_id,
+        langsmith_trace_id=langsmith_trace_id,
+    )
     conversation.messages.append(assistant_message)
 
     # Update timestamps
@@ -567,6 +654,7 @@ async def submit_message_feedback(
     request: MessageFeedbackRequest,
     current_user: Annotated[UserResponse, Depends(get_current_active_user)],
     db: Annotated[AsyncDatabase, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ) -> MessageFeedbackResponse:
     """
     Submit thumbs up/down feedback for an assistant message.
@@ -635,24 +723,48 @@ async def submit_message_feedback(
     })
 
     if existing_feedback:
+        # Update existing feedback - reuse the same langsmith_feedback_id
+        langsmith_feedback_id = existing_feedback.get("langsmith_feedback_id") or _generate_feedback_uuid()
         await db[MESSAGE_FEEDBACK_COLLECTION].update_one(
             {"_id": existing_feedback["_id"]},
-            {"$set": {"feedback_type": request.feedback_type, "created_at": now}}
+            {"$set": {
+                "feedback_type": request.feedback_type,
+                "created_at": now,
+                "langsmith_feedback_id": langsmith_feedback_id
+            }}
         )
         feedback_doc = await db[MESSAGE_FEEDBACK_COLLECTION].find_one({"_id": existing_feedback["_id"]})
     else:
+        # New feedback - generate stable UUID for LangSmith tracking
+        langsmith_feedback_id = _generate_feedback_uuid()
         feedback_doc = {
             "user_id": current_user.id,
             "conversation_id": request.conversation_id,
             "message_id": request.message_id,
             "feedback_type": request.feedback_type,
-            "created_at": now
+            "created_at": now,
+            "langsmith_feedback_id": langsmith_feedback_id
         }
         result = await db[MESSAGE_FEEDBACK_COLLECTION].insert_one(feedback_doc)
         feedback_doc["_id"] = result.inserted_id
 
     logger.info("Message feedback submitted: %s for message %s by user %s",
                 request.feedback_type, request.message_id, current_user.email)
+
+    # Fire background sync to LangSmith (non-blocking, MongoDB is source of truth)
+    run_id = matched_message.get("langsmith_run_id")
+    trace_id = matched_message.get("langsmith_trace_id")
+    if run_id:
+        score = 1.0 if request.feedback_type == "positive" else 0.0
+        background_tasks.add_task(
+            _sync_message_feedback_to_langsmith,
+            run_id=run_id,
+            trace_id=trace_id,
+            score=score,
+            feedback_id=langsmith_feedback_id,
+        )
+    else:
+        logger.debug("Skipping LangSmith sync: assistant message has no langsmith_run_id")
 
     return MessageFeedbackResponse(
         id=str(feedback_doc["_id"]),
@@ -745,6 +857,7 @@ async def submit_conversation_rating(
     request: ConversationRatingRequest,
     current_user: Annotated[UserResponse, Depends(get_current_active_user)],
     db: Annotated[AsyncDatabase, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ) -> ConversationRatingResponse:
     """
     Submit a 1-5 star rating for a conversation.
@@ -789,18 +902,40 @@ async def submit_conversation_rating(
             detail="Conversation already rated"
         )
 
+    # Find root trace_id from conversation (first assistant message's trace_id)
+    trace_id = None
+    for msg in conversation_doc.get("messages", []):
+        if msg.get("role") == "assistant" and msg.get("langsmith_trace_id"):
+            trace_id = msg.get("langsmith_trace_id")
+            break
+
     now = _utc_now()
+    langsmith_feedback_id = _generate_feedback_uuid()
     rating_doc = {
         "user_id": current_user.id,
         "conversation_id": conversation_id,
         "rating": request.rating,
-        "created_at": now
+        "created_at": now,
+        "langsmith_feedback_id": langsmith_feedback_id
     }
     result = await db[CONVERSATION_RATING_COLLECTION].insert_one(rating_doc)
     rating_doc["_id"] = result.inserted_id
 
     logger.info("Conversation rating submitted: %d stars for conversation %s by user %s",
                 request.rating, conversation_id, current_user.email)
+
+    # Fire background sync to LangSmith (non-blocking, MongoDB is source of truth)
+    # Uses root trace_id (not child runs). Normalized score = rating / 5.0
+    if trace_id:
+        score = request.rating / 5.0
+        background_tasks.add_task(
+            _sync_conversation_rating_to_langsmith,
+            trace_id=trace_id,
+            score=score,
+            feedback_id=langsmith_feedback_id,
+        )
+    else:
+        logger.debug("Skipping LangSmith sync: conversation has no langsmith_trace_id")
 
     return ConversationRatingResponse(
         id=str(rating_doc["_id"]),

@@ -9,6 +9,11 @@ from app.ai.embeddings.embedding_factory import EmbeddingFactory
 from app.ai.vectorstore.factory import VectorStoreFactory
 from app.ai.vectorstore.base import SearchResult
 from app.core.config import settings
+from app.ai.tracing.config import (
+    retriever_process_inputs,
+    retriever_process_outputs,
+)
+from langsmith import traceable
 
 logger = logging.getLogger("meditrust.ai.rag.retriever")
 
@@ -77,6 +82,12 @@ class Retriever:
             logger.exception("Retrieval failed for query: %s", query)
             raise RetrieverError(f"Retrieval failed: {str(e)}")
 
+    @traceable(
+        name="retrieve_with_scores",
+        run_type="retriever",
+        process_inputs=retriever_process_inputs,
+        process_outputs=retriever_process_outputs,
+    )
     def retrieve_with_scores(
         self,
         query: str,

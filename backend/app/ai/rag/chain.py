@@ -14,6 +14,11 @@ from app.ai.rag.prompts import build_rag_prompt, build_no_context_prompt, MEDICA
 from app.ai.vectorstore.base import SearchResult
 from app.core.config import settings
 from app.database.connection import db_manager
+from app.ai.tracing.config import (
+    rag_chain_process_inputs,
+    rag_chain_process_outputs,
+)
+from langsmith import traceable, get_current_run_tree
 
 logger = logging.getLogger("meditrust.ai.rag.chain")
 
@@ -27,6 +32,8 @@ class RAGResponse:
     model: str
     doctor_recommendations: List[Dict[str, Any]] = None
     disclaimer: str = ""
+    langsmith_run_id: Optional[str] = None
+    langsmith_trace_id: Optional[str] = None
 
 
 class RAGChainError(Exception):
@@ -213,6 +220,12 @@ class RAGChain:
     def retriever(self):
         return self._retriever
 
+    @traceable(
+        name="rag_generate",
+        run_type="chain",
+        process_inputs=rag_chain_process_inputs,
+        process_outputs=rag_chain_process_outputs,
+    )
     async def generate(
         self,
         query: str,
@@ -231,6 +244,11 @@ class RAGChain:
         Returns:
             RAGResponse with answer, sources, and metadata
         """
+        # Capture LangSmith run IDs at the start of the traced function
+        run_tree = get_current_run_tree()
+        langsmith_run_id = str(run_tree.id) if run_tree else None
+        langsmith_trace_id = str(run_tree.trace_id) if run_tree else None
+
         # Check if this is a medical question
         is_medical = _is_medical_advice_question(query)
         
@@ -261,6 +279,8 @@ class RAGChain:
                 model=self.llm_provider.model,
                 doctor_recommendations=doctor_recommendations,
                 disclaimer=disclaimer,
+                langsmith_run_id=langsmith_run_id,
+                langsmith_trace_id=langsmith_trace_id,
             )
 
         # Build prompt with context
@@ -301,6 +321,8 @@ class RAGChain:
             model=self.llm_provider.model,
             doctor_recommendations=doctor_recommendations,
             disclaimer=disclaimer,
+            langsmith_run_id=langsmith_run_id,
+            langsmith_trace_id=langsmith_trace_id,
         )
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
