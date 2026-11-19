@@ -533,20 +533,30 @@ const AdminDocuments = {
     const uploadError = document.getElementById('uploadError');
     const submitBtn = document.getElementById('submitUploadBtn');
 
+    const fileNameLower = file.name.toLowerCase();
+
     const isPdf =
       file.type.includes('pdf') ||
-      file.name.toLowerCase().endsWith('.pdf');
+      fileNameLower.endsWith('.pdf');
 
     const isTxt =
       file.type === 'text/plain' ||
-      file.name.toLowerCase().endsWith('.txt');
+      fileNameLower.endsWith('.txt');
+
+    const isDoc =
+      file.type === 'application/msword' ||
+      fileNameLower.endsWith('.doc');
+
+    const isDocx =
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      fileNameLower.endsWith('.docx');
 
     const isJson =
       file.type === 'application/json' ||
-      file.name.toLowerCase().endsWith('.json');
+      fileNameLower.endsWith('.json');
 
-    if (!isPdf && !isTxt && !isJson) {
-      this.showUploadError('Please select a PDF, TXT, or JSON file');
+    if (!isPdf && !isTxt && !isDoc && !isDocx && !isJson) {
+      this.showUploadError('Please select a PDF, TXT, DOC, DOCX, or JSON file');
       return;
     }
 

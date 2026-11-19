@@ -20,8 +20,15 @@ def _utc_now() -> datetime:
 
 DOCUMENTS_COLLECTION = "documents"
 PDF_SIGNATURE = b"%PDF"
-ALLOWED_MIME_TYPES = {"application/pdf", "text/plain", "application/json"}
-ALLOWED_EXTENSIONS = {".pdf", ".txt", ".json"}
+DOC_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "text/plain",
+    "application/json",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+ALLOWED_EXTENSIONS = {".pdf", ".txt", ".json", ".doc", ".docx"}
 
 
 class DocumentServiceError(Exception):
@@ -110,6 +117,20 @@ class DocumentService:
         except Exception as exc:
             raise InvalidFileError("PDF structure validation failed") from exc
 
+    def _validate_doc_signature(self, file_content: bytes) -> None:
+        """Validate DOC file signature (OLE compound document)."""
+        if len(file_content) < 8:
+            raise InvalidFileError("File too small to be a valid DOC")
+        if not file_content.startswith(DOC_SIGNATURE):
+            raise InvalidFileError("Invalid DOC file signature")
+
+    def _validate_docx_structure(self, file_content: bytes) -> None:
+        """Validate DOCX file structure (ZIP-based)."""
+        if len(file_content) < 4:
+            raise InvalidFileError("File too small to be a valid DOCX")
+        if not file_content.startswith(b"PK\x03\x04") and not file_content.startswith(b"PK\x05\x06") and not file_content.startswith(b"PK\x07\x08"):
+            raise InvalidFileError("Invalid DOCX file signature: not a valid ZIP archive")
+
     def _validate_json_content(self, file_content: bytes) -> None:
         """Validate JSON file content is valid JSON and not empty."""
         import json
@@ -129,6 +150,16 @@ class DocumentService:
         """Check if file is a JSON file based on extension or MIME type."""
         ext = Path(filename).suffix.lower()
         return ext == ".json" or content_type == "application/json"
+
+    def _is_doc_file(self, filename: str, content_type: Optional[str]) -> bool:
+        """Check if file is a DOC file based on extension or MIME type."""
+        ext = Path(filename).suffix.lower()
+        return ext == ".doc" or content_type == "application/msword"
+
+    def _is_docx_file(self, filename: str, content_type: Optional[str]) -> bool:
+        """Check if file is a DOCX file based on extension or MIME type."""
+        ext = Path(filename).suffix.lower()
+        return ext == ".docx" or content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     def _generate_document_id(self) -> str:
         """Generate unique document ID."""
@@ -238,7 +269,7 @@ class DocumentService:
         uploaded_by: str,
     ) -> dict:
         """
-        Upload and validate a document (PDF, TXT, or JSON).
+        Upload and validate a document (PDF, TXT, DOC, DOCX, or JSON).
 
         Args:
             file_content: Raw file bytes
@@ -262,6 +293,10 @@ class DocumentService:
         if self._is_pdf_file(filename, content_type):
             self._validate_pdf_signature(file_content)
             self._validate_pdf_structure(file_content)
+        elif self._is_doc_file(filename, content_type):
+            self._validate_doc_signature(file_content)
+        elif self._is_docx_file(filename, content_type):
+            self._validate_docx_structure(file_content)
         elif self._is_json_file(filename, content_type):
             self._validate_json_content(file_content)
 
@@ -274,6 +309,10 @@ class DocumentService:
             file_type = content_type
             if self._is_pdf_file(filename, content_type):
                 file_type = "application/pdf"
+            elif self._is_doc_file(filename, content_type):
+                file_type = "application/msword"
+            elif self._is_docx_file(filename, content_type):
+                file_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             elif self._is_json_file(filename, content_type):
                 file_type = "application/json"
             else:

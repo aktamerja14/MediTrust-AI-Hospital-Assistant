@@ -13,7 +13,9 @@ from app.database.connection import get_db
 from app.api.dependencies import get_auth_service, get_current_active_user, require_any_role
 from app.services.auth import AuthService
 from app.schemas.auth import UserResponse
+from app.schemas.doctor import DoctorRecommendation
 from app.ai.rag.chain import RAGChain, RAGChainError
+from app.ai.rag.prompts import MEDICAL_DISCLAIMER
 
 logger = logging.getLogger("meditrust.api.chat")
 
@@ -116,6 +118,7 @@ class ChatMessage(BaseModel):
     role: str = Field(..., description="Message role: 'user' or 'assistant'")
     content: str = Field(..., description="Message content")
     timestamp: datetime = Field(default_factory=_utc_now, description="Message timestamp")
+    doctor_recommendations: List[DoctorRecommendation] = Field(default_factory=list, description="Recommended doctors for medical questions")
     langsmith_run_id: Optional[str] = Field(default=None, description="LangSmith run ID for tracing")
     langsmith_trace_id: Optional[str] = Field(default=None, description="LangSmith trace ID for tracing")
 
@@ -127,6 +130,20 @@ class SourceReference(BaseModel):
     page: str
     score: float
     content_preview: str
+
+
+class DoctorRecommendation(BaseModel):
+    """Doctor recommendation in chat response."""
+    doctor_id: str
+    name: str
+    qualifications: str
+    specialization: str
+    experience_years: int
+    photo_path: str
+    phone: str
+    available_from: str
+    available_to: str
+    match_reason: str
 
 
 class ChatConversation(BaseModel):
@@ -159,6 +176,8 @@ class ChatResponse(BaseModel):
     sources: List[SourceReference] = Field(default_factory=list, description="Source document references")
     has_context: bool = Field(default=False, description="Whether relevant context was found")
     model: str = Field(default="", description="LLM model used")
+    doctor_recommendations: List[DoctorRecommendation] = Field(default_factory=list, description="Recommended doctors for medical questions")
+    disclaimer: str = Field(default="", description="Medical disclaimer if applicable")
 
 
 class ConversationListItem(BaseModel):
@@ -301,14 +320,17 @@ async def send_message(
     # Generate AI response using RAG chain
     try:
         rag_chain = get_rag_chain()
-        rag_response = rag_chain.generate(
+        rag_response = await rag_chain.generate(
             query=request.message,
             conversation_history=history,
+            db=db,
         )
         assistant_content = rag_response.answer
         sources = [SourceReference(**s) for s in rag_response.sources]
         has_context = rag_response.has_context
         model = rag_response.model
+        doctor_recommendations = rag_response.doctor_recommendations or []
+        disclaimer = rag_response.disclaimer
         langsmith_run_id = rag_response.langsmith_run_id
         langsmith_trace_id = rag_response.langsmith_trace_id
     except RAGChainError as e:
@@ -317,14 +339,13 @@ async def send_message(
         assistant_content = (
             "I apologize, but I'm experiencing technical difficulties accessing the "
             "knowledge base. Please try again in a moment, or contact support if the "
-            "issue persists.\n\n"
-            "---\n"
-            "**Disclaimer:** This AI assistant provides general health information only. "
-            "For medical emergencies, call emergency services immediately."
+            "issue persists."
         )
         sources = []
         has_context = False
         model = ""
+        doctor_recommendations = []
+        disclaimer = MEDICAL_DISCLAIMER
         langsmith_run_id = None
         langsmith_trace_id = None
     except Exception as e:
@@ -338,6 +359,7 @@ async def send_message(
         id=str(ObjectId()),
         role="assistant",
         content=assistant_content,
+        doctor_recommendations=doctor_recommendations,
         langsmith_run_id=langsmith_run_id,
         langsmith_trace_id=langsmith_trace_id,
     )
@@ -379,6 +401,8 @@ async def send_message(
         sources=sources,
         has_context=has_context,
         model=model,
+        doctor_recommendations=doctor_recommendations,
+        disclaimer=disclaimer,
     )
 
 

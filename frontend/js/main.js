@@ -14,12 +14,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initStickyHeader();
   initMobileMenu();
   initScrollSpy();
-  initDoctorFilters();
-  initDepartmentDoctorSync();
+  loadDoctorsFromAPI(); // This will initialize filters and dept sync after loading
   initAppointmentBooking();
   initContactForm();
   initDateConstraints();
   initPlaceholderLinks();
+  handlePreselectedDoctor(); // Handle doctor selection from chat
   // Auth modals are now initialized by auth.js initMainWebsiteAuth()
 });
 
@@ -106,8 +106,119 @@ function initScrollSpy() {
 }
 
 /* ==========================================================================
-   4. Doctor Specialty Filter & Quick Booking Sync
+   4. Doctor Specialty Filter & Quick Booking Sync (API-driven)
    ========================================================================== */
+let allDoctors = [];
+
+function getStaticBaseUrl() {
+  const apiBase = window.API_BASE || '';
+  if (apiBase.includes('/api/')) {
+    return apiBase.substring(0, apiBase.indexOf('/api/'));
+  }
+  return '';
+}
+
+function getDoctorPhotoUrl(photoPath) {
+  const staticBase = getStaticBaseUrl();
+  if (photoPath.startsWith('doctor_photos/')) {
+    return `${staticBase}/${photoPath}`;
+  }
+  if (photoPath.startsWith('/')) {
+    return `${staticBase}${photoPath}`;
+  }
+  return `${staticBase}/doctor_photos/${photoPath}`;
+}
+
+async function loadDoctorsFromAPI() {
+  const grid = document.getElementById('doctors-grid');
+  if (!grid) return;
+
+  try {
+    grid.innerHTML = '<div class="loading-doctors">Loading doctors...</div>';
+
+    const response = await fetch(`${window.API_BASE || ''}/doctors/public`);
+
+    if (!response.ok) {
+      throw new Error('Failed to load doctors');
+    }
+
+    const data = await response.json();
+    allDoctors = data.doctors || [];
+    renderDoctorCards(allDoctors);
+    initDoctorFilters();
+    initDepartmentDoctorSync();
+  } catch (error) {
+    console.error('Failed to load doctors:', error);
+    grid.innerHTML = '<div class="error-message">Failed to load doctors. Please try again later.</div>';
+  }
+}
+
+function renderDoctorCards(doctors) {
+  const grid = document.getElementById('doctors-grid');
+  if (!grid) return;
+
+  if (doctors.length === 0) {
+    grid.innerHTML = '<div class="no-doctors">No doctors available</div>';
+    return;
+  }
+
+  grid.innerHTML = doctors.map(doctor => {
+    const specialtyKey = getSpecialtyKey(doctor.specialization);
+    const photoUrl = getDoctorPhotoUrl(doctor.photo_path);
+    return `
+      <div class="doctor-card" data-specialty="${specialtyKey}" data-doctor-id="${doctor.doctor_id}">
+        <div class="doctor-header">
+          <div class="doctor-avatar-circle">
+            <img src="${photoUrl}" alt="${doctor.name}" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <svg class="fallback-avatar" width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+          </div>
+          <span class="doctor-status-badge"><span class="status-dot"></span> Available Today</span>
+        </div>
+        <div class="doctor-body">
+          <span class="doctor-specialty-badge">${doctor.specialization.split('(')[0].trim()}</span>
+          <h3 class="doctor-name">${doctor.name} <span class="demo-tag">Demo</span></h3>
+          <p class="doctor-qualification">${doctor.qualifications}</p>
+
+          <div class="doctor-details-list">
+            <div class="detail-row">
+              <span>Experience:</span>
+              <strong>${doctor.experience_years}+ Years</strong>
+            </div>
+            <div class="detail-row">
+              <span>OPD Timings:</span>
+              <strong>${doctor.available_from} - ${doctor.available_to}</strong>
+            </div>
+            <div class="detail-row">
+              <span>Phone:</span>
+              <strong>${doctor.phone}</strong>
+            </div>
+          </div>
+
+          <div class="doctor-footer">
+            <button type="button" class="btn btn-primary btn-sm btn-doctor-book" data-doctor="${doctor.name}" data-department="${specialtyKey}" data-doctor-id="${doctor.doctor_id}" style="width: 100%;">
+              Book Consultation
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Re-bind booking buttons
+  bindDoctorBookingButtons();
+}
+
+function getSpecialtyKey(specialization) {
+  const spec = specialization.toLowerCase();
+  if (spec.includes('cardio')) return 'cardiology';
+  if (spec.includes('neuro')) return 'neurology';
+  if (spec.includes('derma') || spec.includes('skin') || spec.includes('hair') || spec.includes('nail')) return 'dermatology';
+  if (spec.includes('ortho') || spec.includes('bone') || spec.includes('joint')) return 'orthopedics';
+  if (spec.includes('gyne') || spec.includes('women') || spec.includes('pregnan')) return 'gynecology';
+  if (spec.includes('general') || spec.includes('physician')) return 'medicine';
+  return 'general';
+}
+
 function initDoctorFilters() {
   const filterBtns = document.querySelectorAll('.filter-btn');
   const doctorCards = document.querySelectorAll('.doctor-card');
@@ -116,7 +227,6 @@ function initDoctorFilters() {
 
   filterBtns.forEach(btn => {
     btn.addEventListener('click', () => {
-      // Toggle active button style
       filterBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
@@ -133,13 +243,21 @@ function initDoctorFilters() {
     });
   });
 
-  // Handle "Book Consultation" clicks on doctor cards to pre-populate booking form
+  bindDoctorBookingButtons();
+}
+
+function bindDoctorBookingButtons() {
   const doctorBookingBtns = document.querySelectorAll('.btn-doctor-book');
   doctorBookingBtns.forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    // Remove existing listener by cloning
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+
+    newBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      const doctorName = btn.getAttribute('data-doctor');
-      const department = btn.getAttribute('data-department');
+      const doctorName = newBtn.getAttribute('data-doctor');
+      const department = newBtn.getAttribute('data-department');
+      const doctorId = newBtn.getAttribute('data-doctor-id');
 
       const deptSelect = document.getElementById('appointmentDept');
       const docSelect = document.getElementById('appointmentDoctor');
@@ -149,61 +267,51 @@ function initDoctorFilters() {
         populateDoctorsByDepartment(department, doctorName);
       }
 
-      // Smooth scroll to appointment section
+      // Also pre-select the specific doctor if we have the ID
+      if (docSelect && doctorId) {
+        // The populateDoctorsByDepartment will handle selection by name
+        const doctor = allDoctors.find(d => d.doctor_id === doctorId);
+        if (doctor) {
+          // Trigger change to update doctor dropdown
+          setTimeout(() => {
+            docSelect.value = doctor.name;
+          }, 0);
+        }
+      }
+
       const appointmentSection = document.getElementById('appointment');
       if (appointmentSection) {
         appointmentSection.scrollIntoView({ behavior: 'smooth' });
-        showToast(`Selected Dr. ${doctorName} for appointment`, 'info');
+        showToast(`Selected ${doctorName} for appointment`, 'info');
       }
     });
   });
 }
 
 /* ==========================================================================
-   5. Department & Doctor Dynamic Selection Sync
+   5. Department & Doctor Dynamic Selection Sync (from API)
    ========================================================================== */
-const doctorsByDepartment = {
-  cardiology: [
-    { name: 'Dr. Elena Rostova', title: 'MD, FACC - Senior Interventional Cardiologist' },
-    { name: 'Dr. Marcus Vance', title: 'MD - Cardiac Electrophysiology Specialist' }
-  ],
-  neurology: [
-    { name: 'Dr. Julian Thorne', title: 'MD, PhD - Senior Consultant Neurosurgeon' },
-    { name: 'Dr. Priya Sharma', title: 'MD, DM - Comprehensive Neurologist' }
-  ],
-  orthopedics: [
-    { name: 'Dr. David Chen', title: 'MS (Ortho), FRCS - Joint Replacement Surgeon' },
-    { name: 'Dr. Rachel Adams', title: 'MS - Sports Medicine & Arthroscopy Specialist' }
-  ],
-  pediatrics: [
-    { name: 'Dr. Sarah Jenkins', title: 'MD (Pediatrics) - Chief Pediatrician' },
-    { name: 'Dr. Carlos Mendoza', title: 'MD - Neonatology & Adolescent Health' }
-  ],
-  oncology: [
-    { name: 'Dr. Aaliyah Khan', title: 'MD, DM - Medical Oncologist' }
-  ],
-  medicine: [
-    { name: 'Dr. Robert Sterling', title: 'MD - Internal Medicine & Preventive Health' }
-  ]
-};
-
 function populateDoctorsByDepartment(departmentKey, preselectedDoctor = '') {
   const doctorSelect = document.getElementById('appointmentDoctor');
   if (!doctorSelect) return;
 
   doctorSelect.innerHTML = '<option value="">Select Doctor (Optional / Any Available)</option>';
 
-  if (departmentKey && doctorsByDepartment[departmentKey]) {
-    doctorsByDepartment[departmentKey].forEach(doc => {
-      const option = document.createElement('option');
-      option.value = doc.name;
-      option.textContent = `${doc.name} (${doc.title.split('-')[0].trim()})`;
-      if (preselectedDoctor && doc.name.toLowerCase().includes(preselectedDoctor.toLowerCase())) {
-        option.selected = true;
-      }
-      doctorSelect.appendChild(option);
-    });
-  }
+  // Filter doctors from API data by specialization
+  const matchingDoctors = allDoctors.filter(doc => {
+    const specKey = getSpecialtyKey(doc.specialization);
+    return specKey === departmentKey;
+  });
+
+  matchingDoctors.forEach(doc => {
+    const option = document.createElement('option');
+    option.value = doc.name;
+    option.textContent = `${doc.name} (${doc.qualifications})`;
+    if (preselectedDoctor && doc.name.toLowerCase().includes(preselectedDoctor.toLowerCase())) {
+      option.selected = true;
+    }
+    doctorSelect.appendChild(option);
+  });
 }
 
 function initDepartmentDoctorSync() {
@@ -213,6 +321,49 @@ function initDepartmentDoctorSync() {
   deptSelect.addEventListener('change', (e) => {
     populateDoctorsByDepartment(e.target.value);
   });
+}
+
+/* ==========================================================================
+   5b. Handle Pre-selected Doctor from Chat
+   ========================================================================== */
+function handlePreselectedDoctor() {
+  const stored = sessionStorage.getItem('preselectedDoctor');
+  if (!stored) return;
+
+  try {
+    const data = JSON.parse(stored);
+    const { name, doctorId, department } = data;
+
+    const deptSelect = document.getElementById('appointmentDept');
+    const docSelect = document.getElementById('appointmentDoctor');
+
+    if (deptSelect && department) {
+      deptSelect.value = department;
+      populateDoctorsByDepartment(department, name);
+    }
+
+    // Also pre-select the specific doctor if we have the ID
+    if (docSelect && doctorId) {
+      const doctor = allDoctors.find(d => d.doctor_id === doctorId);
+      if (doctor) {
+        setTimeout(() => {
+          docSelect.value = doctor.name;
+        }, 0);
+      }
+    }
+
+    // Scroll to appointment section
+    const appointmentSection = document.getElementById('appointment');
+    if (appointmentSection) {
+      appointmentSection.scrollIntoView({ behavior: 'smooth' });
+      showToast(`Pre-selected ${name} for appointment`, 'info');
+    }
+
+    // Clear the stored data
+    sessionStorage.removeItem('preselectedDoctor');
+  } catch (error) {
+    console.error('Failed to handle preselected doctor:', error);
+  }
 }
 
 /* ==========================================================================

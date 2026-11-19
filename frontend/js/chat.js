@@ -18,6 +18,97 @@ const ChatApp = {
   ratingInProgress: false,
   pendingNavigation: false,
 
+  getStaticBaseUrl() {
+    const apiBase = API_BASE || '';
+    if (apiBase.includes('/api/')) {
+      return apiBase.substring(0, apiBase.indexOf('/api/'));
+    }
+    return '';
+  },
+
+  getDoctorPhotoUrl(photoPath) {
+    const staticBase = this.getStaticBaseUrl();
+    if (photoPath.startsWith('doctor_photos/')) {
+      return `${staticBase}/${photoPath}`;
+    }
+    if (photoPath.startsWith('/')) {
+      return `${staticBase}${photoPath}`;
+    }
+    return `${staticBase}/doctor_photos/${photoPath}`;
+  },
+
+  renderMarkdown(text) {
+    if (!text) return '';
+    let html = this.escapeHtml(text);
+
+    // Headings
+    html = html
+      .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+      .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+      .replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+
+    // Bold and italic
+    html = html
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Bullet lists - convert - items to <li>
+    html = html.replace(/^\-\s+(.+)$/gm, '<li>$1</li>');
+
+    // Split by double newlines into blocks FIRST
+    const blocks = html.split(/\n{2,}/);
+    const htmlBlocks = [];
+
+    for (const block of blocks) {
+      const trimmed = block.trim();
+      if (!trimmed) continue;
+
+      // Check if block STARTS with a heading followed by list items
+      // Pattern: <h2>...</h2>\n<li>...</li>\n<li>...</li>...
+      const headingListMatch = trimmed.match(/^(<h[2-4]>.*?<\/h[2-4]>)\n((?:<li>.*?<\/li>\n?)+)$/s);
+      if (headingListMatch) {
+        const heading = headingListMatch[1];
+        const listContent = headingListMatch[2];
+        const liMatches = listContent.match(/<li>.*?<\/li>/gs);
+        if (liMatches && liMatches.length > 0) {
+          const listHtml = '<ul>' + liMatches.join('') + '</ul>';
+          htmlBlocks.push(heading + '\n' + listHtml);
+        } else {
+          htmlBlocks.push(trimmed);
+        }
+        continue;
+      }
+
+      // Check if block contains only list items
+      const lines = trimmed.split('\n');
+      const nonEmptyLines = lines.filter(l => l.trim());
+      const isListBlock = nonEmptyLines.length > 0 && nonEmptyLines.every(l => l.trim().startsWith('<li>'));
+
+      if (isListBlock) {
+        const liMatches = trimmed.match(/<li>.*?<\/li>/gs);
+        if (liMatches && liMatches.length > 0) {
+          trimmed = '<ul>' + liMatches.join('') + '</ul>';
+        }
+        htmlBlocks.push(trimmed);
+      } else if (trimmed.startsWith('<h2>') || trimmed.startsWith('<h3>') || trimmed.startsWith('<h4>') ||
+                 trimmed.startsWith('<ul>') || trimmed.startsWith('<ol>')) {
+        htmlBlocks.push(trimmed);
+      } else {
+        const withBr = trimmed.replace(/\n/g, '<br>');
+        htmlBlocks.push('<p>' + withBr + '</p>');
+      }
+    }
+
+    html = htmlBlocks.join('\n');
+
+    // Clean up
+    html = html.replace(/<p><\/p>/g, '');
+    html = html.replace(/<p><br>/g, '<p>');
+    html = html.replace(/<br><\/p>/g, '</p>');
+
+    return html;
+  },
+
   init() {
     console.log('[ChatApp] init() called');
     this.bindEvents();
@@ -227,6 +318,16 @@ const ChatApp = {
           this.handleMessageFeedback(messageElement, messageId, feedbackType);
         }
       }
+
+      // Book Appointment buttons in doctor recommendations
+      const bookBtn = e.target.closest('.btn-book-appointment');
+      if (bookBtn) {
+        e.preventDefault();
+        const doctorName = bookBtn.getAttribute('data-doctor');
+        const doctorId = bookBtn.getAttribute('data-doctor-id');
+        const department = bookBtn.getAttribute('data-department');
+        this.handleBookAppointmentFromChat(doctorName, doctorId, department);
+      }
     });
 
     // Star rating hover preview (delegated)
@@ -393,7 +494,7 @@ const ChatApp = {
     console.log('[ChatApp] sendMessage called, conversationId:', conversationId);
     const authHeader = this.getAuthHeader();
     console.log('[ChatApp] sendMessage authHeader:', authHeader);
-    
+
     try {
       const response = await fetch(`${API_BASE}/chat/message`, {
         method: 'POST',
@@ -670,8 +771,8 @@ const ChatApp = {
 
       this.hideTypingIndicator();
 
-      // Add assistant message with backend message ID
-      this.addMessage('assistant', response.assistant_message.content, false, response.assistant_message.id);
+      // Add assistant message with backend message ID, doctor recommendations, and disclaimer
+      this.addMessage('assistant', response.assistant_message.content, false, response.assistant_message.id, response.doctor_recommendations, response.disclaimer);
 
       // Update conversation ID if new conversation was created
       const isNewConversation = !this.currentConversationId;
@@ -749,13 +850,15 @@ const ChatApp = {
     input.focus();
   },
 
-  addMessage(role, content, error = false, messageId = null) {
+  addMessage(role, content, error = false, messageId = null, doctorRecommendations = [], disclaimer = '') {
     const message = {
       id: messageId || 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
       role,
       content,
       timestamp: new Date().toISOString(),
-      error
+      error,
+      doctor_recommendations: doctorRecommendations,
+      disclaimer: disclaimer
     };
 
     const container = document.getElementById('chatMessages');
@@ -803,11 +906,59 @@ const ChatApp = {
       `;
     }
 
+    // Doctor recommendations HTML
+    let doctorRecommendationsHTML = '';
+    if (!isUser && !msg.error && msg.doctor_recommendations && msg.doctor_recommendations.length > 0) {
+      doctorRecommendationsHTML = `
+        <div class="doctor-recommendations" role="section" aria-label="Recommended doctors">
+          <div class="doctor-recommendations-header">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+            <span>Recommended Specialists</span>
+          </div>
+          <div class="doctor-recommendations-list">
+            ${msg.doctor_recommendations.map(doc => `
+              <div class="doctor-recommendation-card">
+                <div class="doctor-rec-avatar">
+                  <img src="${this.getDoctorPhotoUrl(doc.photo_path)}" alt="${doc.name}" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                  <svg class="fallback-avatar" width="36" height="36" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:none;" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                </div>
+                <div class="doctor-rec-info">
+                  <h4 class="doctor-rec-name">${this.escapeHtml(doc.name)}</h4>
+                  <p class="doctor-rec-qualification">${this.escapeHtml(doc.qualifications)}</p>
+                  <p class="doctor-rec-specialization">${this.escapeHtml(doc.specialization)}</p>
+                  <div class="doctor-rec-details">
+                    <span><strong>Experience:</strong> ${doc.experience_years}+ years</span>
+                    <span><strong>Phone:</strong> ${this.escapeHtml(doc.phone)}</span>
+                    <span><strong>Hours:</strong> ${this.escapeHtml(doc.available_from)} - ${this.escapeHtml(doc.available_to)}</span>
+                  </div>
+                  <p class="doctor-rec-reason">${this.escapeHtml(doc.match_reason)}</p>
+                </div>
+                <a href="index.html#appointment" class="btn btn-primary btn-sm btn-book-appointment" data-doctor="${this.escapeHtml(doc.name)}" data-doctor-id="${this.escapeHtml(doc.doctor_id)}" data-department="${this.getDepartmentKey(doc.specialization)}" target="_blank" rel="noopener">
+                  Book Appointment
+                </a>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    let disclaimerHTML = '';
+    if (!isUser && !msg.error && msg.disclaimer) {
+      disclaimerHTML = `<div class="message-disclaimer">${this.renderMarkdown(msg.disclaimer)}</div>`;
+    }
+
+    const bubbleContent = isUser
+        ? this.escapeHtml(msg.content)
+        : this.renderMarkdown(msg.content);
+
     return `
       <div class="message ${isUser ? 'message-user' : 'message-assistant'} ${errorClass}" data-message-id="${msg.id}">
         <div class="message-avatar">${avatar}</div>
         <div class="message-content">
-          <div class="message-bubble ${errorClass}">${this.escapeHtml(msg.content)}</div>
+          <div class="message-bubble ${errorClass}">${bubbleContent}</div>
+          ${doctorRecommendationsHTML}
+          ${disclaimerHTML}
           <div class="message-meta">
             <span class="message-time">${time}</span>
             ${feedbackHTML}
@@ -815,6 +966,17 @@ const ChatApp = {
         </div>
       </div>
     `;
+  },
+
+  getDepartmentKey(specialization) {
+    const spec = specialization.toLowerCase();
+    if (spec.includes('cardio')) return 'cardiology';
+    if (spec.includes('neuro')) return 'neurology';
+    if (spec.includes('derma') || spec.includes('skin') || spec.includes('hair') || spec.includes('nail')) return 'dermatology';
+    if (spec.includes('ortho') || spec.includes('bone') || spec.includes('joint')) return 'orthopedics';
+    if (spec.includes('gyne') || spec.includes('women') || spec.includes('pregnan')) return 'gynecology';
+    if (spec.includes('general') || spec.includes('physician') || spec.includes('medicine')) return 'medicine';
+    return 'medicine';
   },
 
   renderConversations() {
@@ -1182,6 +1344,20 @@ const ChatApp = {
     if (thumbsDown) thumbsDown.classList.toggle('active', feedbackType === 'negative');
   },
 
+  handleBookAppointmentFromChat(doctorName, doctorId, department) {
+    // Navigate to the main website appointment section
+    window.location.href = `index.html#appointment`;
+
+    // Store the doctor selection in sessionStorage for the appointment page to pick up
+    sessionStorage.setItem('preselectedDoctor', JSON.stringify({
+      name: doctorName,
+      doctorId: doctorId,
+      department: department
+    }));
+
+    this.showToast(`Redirecting to book appointment with ${doctorName}`, 'info');
+  },
+
   async loadMessageFeedbackForConversation(conversationId) {
     const container = document.getElementById('chatMessages');
     if (!container) return;
@@ -1331,7 +1507,7 @@ const ChatApp = {
     } catch (error) {
       console.error('Failed to submit rating:', error);
       const errorMessage = error.message || 'Failed to submit rating. Please try again.';
-      
+
       if (errorMessage.includes('already rated') || errorMessage.includes('409')) {
         this.conversationRatingCache[conversationId] = { rated: true };
         this.showToast('Conversation already rated.', 'info');

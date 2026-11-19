@@ -12,7 +12,7 @@ from openai import OpenAI
 from openai import (
     AuthenticationError as OpenAIAuthError,
     RateLimitError as OpenAIRateLimitError,
-    Timeout as OpenAITimeout,
+    APITimeoutError as OpenAITimeout,
     NotFoundError as OpenAINotFoundError,
     APIConnectionError,
     APIStatusError,

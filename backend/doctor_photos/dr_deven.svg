@@ -1,0 +1,6 @@
+<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="200" height="200" fill="#e0f2fe"/>
+  <circle cx="100" cy="70" r="40" fill="#0284c7"/>
+  <ellipse cx="100" cy="170" rx="60" ry="50" fill="#0284c7"/>
+  <text x="100" y="195" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#0369a1">Dr. Deven Patel</text>
+</svg>

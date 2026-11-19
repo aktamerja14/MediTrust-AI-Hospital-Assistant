@@ -1006,3 +1006,4 @@ window.clearAllAuthData = clearAllAuthData;
 window.getAuthHeader = getAuthHeader;
 window.getAuthHeaderAny = getAuthHeaderAny;
 window.getValidAuthHeader = getValidAuthHeader;
+window.API_BASE = API_BASE;

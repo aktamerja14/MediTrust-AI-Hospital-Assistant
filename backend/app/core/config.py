@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Path(__file__) is backend/app/core/config.py -> .parent.parent.parent is backend/
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 BACKEND_ENV_FILE = BACKEND_DIR / ".env"
+VECTOR_STORE_DIR = BACKEND_DIR / "data" / "vector_store"
 
 
 class Settings(BaseSettings):
@@ -59,10 +60,10 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "gemini"
 
     # CHANGE HERE: Set the model supported by the selected provider.
-    # Gemini Free Tier: gemini-1.5-flash, gemini-1.5-flash-8b, gemini-1.5-pro
+    # Gemini Free Tier: gemini-3.8-flash, gemini-1.5-flash, gemini-1.5-flash-8b, gemini-1.5-pro
     # Groq Free Tier: llama-3.1-8b-instant, llama-3.1-70b-versatile, mixtral-8x7b-32768
     # OpenRouter Free Tier: meta-llama/llama-3.1-8b-instruct:free, mistralai/mistral-7b-instruct:free
-    LLM_MODEL: str = "gemini-1.5-flash"
+    LLM_MODEL: str = "gemini-3.8-flash"
 
     # CHANGE HERE: Add the API key for the selected provider.
     # Gemini: Get from https://aistudio.google.com/apikey
@@ -102,7 +103,7 @@ class Settings(BaseSettings):
     VECTOR_STORE: str = "faiss"
 
     # CHANGE HERE: Path for FAISS index persistence.
-    VECTOR_STORE_PATH: str = "data/vector_store"
+    VECTOR_STORE_PATH: str = str(VECTOR_STORE_DIR)
 
     # CHANGE HERE: RAG chunk size and overlap.
     RAG_CHUNK_SIZE: int = 1000

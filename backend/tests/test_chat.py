@@ -242,6 +242,52 @@ class TestChatEndpoints:
         list_response = await client.get("/api/v1/chat/conversations", headers=headers)
         assert list_response.json()["conversations"] == []
 
+
+    @pytest.mark.asyncio
+    async def test_patient_cannot_delete_other_user_conversation(self, client, test_db):
+        """Test patient cannot delete another user's conversation."""
+        auth_service = AuthService(test_db)
+
+        patient_a = await auth_service.create_user(
+            UserCreate(email="delete_a@test.com", password="patientPass123"),
+            role="patient"
+        )
+        patient_b = await auth_service.create_user(
+            UserCreate(email="delete_b@test.com", password="patientPass123"),
+            role="patient"
+        )
+
+        headers_a = {
+            "Authorization": f"Bearer {create_token(patient_a.id, 'patient')}"
+        }
+        headers_b = {
+            "Authorization": f"Bearer {create_token(patient_b.id, 'patient')}"
+        }
+
+        # Patient A creates a conversation
+        send_response = await client.post(
+            "/api/v1/chat/message",
+            json={"message": "My private conversation"},
+            headers=headers_a
+        )
+        assert send_response.status_code == 200
+        conversation_id = send_response.json()["conversation_id"]
+
+        # Patient B attempts to delete Patient A's conversation
+        delete_response = await client.delete(
+            f"/api/v1/chat/conversations/{conversation_id}",
+            headers=headers_b
+        )
+        assert delete_response.status_code == 404
+
+        # Verify Patient A's conversation still exists
+        get_response = await client.get(
+            f"/api/v1/chat/conversations/{conversation_id}",
+            headers=headers_a
+        )
+        assert get_response.status_code == 200
+
+
     @pytest.mark.asyncio
     async def test_missing_token_returns_401(self, client):
         """Test chat endpoints return 401 without token."""
@@ -421,16 +467,16 @@ class TestChatEndpoints:
 
         # Create first conversation
         await client.post("/api/v1/chat/message", json={"message": "First conversation"}, headers=headers)
-        
+
         # Small delay to ensure different timestamps
         import asyncio
         await asyncio.sleep(0.1)
-        
+
         # Create second conversation
         await client.post("/api/v1/chat/message", json={"message": "Second conversation"}, headers=headers)
-        
+
         await asyncio.sleep(0.1)
-        
+
         # Create third conversation
         await client.post("/api/v1/chat/message", json={"message": "Third conversation"}, headers=headers)
 

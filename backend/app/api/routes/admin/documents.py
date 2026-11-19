@@ -1,5 +1,6 @@
 """Admin document management API routes."""
 import logging
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -25,6 +26,11 @@ from app.services.document_service import (
 from app.services.rag_ingestion import RAGIngestionService, RAGIngestionError
 
 logger = logging.getLogger("meditrust.api.admin.documents")
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 router = APIRouter(prefix="/admin/documents", tags=["Admin Documents"])
 
@@ -148,10 +154,10 @@ async def list_documents(
                 original_filename=doc["original_filename"],
                 storage_filename=doc["storage_filename"],
                 file_type=doc["file_type"],
-                file_size=doc["file_size"],
-                upload_timestamp=doc["upload_timestamp"],
-                processing_status=doc["processing_status"],
-                uploaded_by=doc["uploaded_by"],
+                file_size=doc.get("file_size", 0) or 0,
+                upload_timestamp=doc.get("upload_timestamp") or _utc_now(),
+                processing_status=doc.get("processing_status", "uploaded"),
+                uploaded_by=doc.get("uploaded_by", ""),
             )
             for doc in documents
         ]
