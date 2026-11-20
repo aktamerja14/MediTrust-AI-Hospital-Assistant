@@ -1,0 +1,7 @@
+ID	Name	Qualifications	Specialization	Experience	Photo	Phone	Available From	Available To
+dr.deven	Dr. Deven Patel	MBBS	General Physician (સામાન્ય રોગોની સારવાર)	6	doctor_photos/dr_deven.svg	9700112232	10 a.m.	7:30 p.m.
+dr.rahul	Dr. Rahul Maheta	MBBS, MD (Neurology)	Neurologist (મગજ અને નર્વસ સિસ્ટમ)	5	doctor_photos/dr_rahul.svg	9900112233	9 a.m.	6 p.m.
+dr.niddhi	Dr. Nidhi Gopani	MBBS, MD (Dermatology)	Dermatologist (ત્વચા, વાળ, નખ)	7	doctor_photos/dr_niddhi.svg	9812345678	11 a.m.	7 p.m.
+dr.nita	Dr. Nita Surani	MBBS, MD (Orthopedics)	Orthopedics (હાડકાં અને સાંધાના રોગ)	5	doctor_photos/dr_neeta.svg	9898123456	9:30 a.m.	5:30 p.m.
+dr.suresh	Dr. Suresh Patel	MBBS, MS (Gynecology)	Gynecologist (મહિલાઓના રોગ / ગર્ભાવસ્થા)	8	doctor_photos/dr_shuresh.svg	9823456712	5 a.m.	10 p.m.
+dr.mahesh	Dr. Mahesh Ramani	MBBS, MD (Cardiology)	Cardiologist (હૃદયના રોગ)	12	doctor_photos/dr_mahesh_GyexvM8.svg	9876543210	5 a.m.	11 p.m.

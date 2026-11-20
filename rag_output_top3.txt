@@ -1,0 +1,24 @@
+Has context: True
+Answer: **What is Diabetes?**  
+Diabetes mellitus is a chronic metabolic disorder in which blood glucose (sugar) levels are elevated. This occurs because the body either does not produce enough insulin (as in Type 1 diabetes) or cannot use the insulin it makes effectively (as in Type 2 diabetes). Insulin, a hormone from the pancreas, is needed for glucose from food to enter cells for energy.
+
+**Common Symptoms**  
+The classic signs of high blood sugar (hyperglycemia) include:
+
+- Frequent urination, especially at night (polyuria)  
+- Excessive thirst (polydipsia)  
+- Unexplained weight loss  
+- Increased hunger (polyphagia)  
+- Fatigue and weakness  
+- Blurred vision  
+- Slow‑healing cuts or bruises  
+- Frequent infections (skin, gum, bladder, vaginal)  
+- Tingling or numbness in the hands and feet (neuropathy)  
+- Dry, itchy skin  
+
+(Note: Some people with Type 2 diabetes may have no symptoms initially.)
+Disclaimer: 
+
+---
+**Disclaimer:** This AI assistant provides general health information only. It is not a substitute for professional medical advice, diagnosis, or treatment. For medical emergencies, call emergency services immediately. For personalized medical advice, consult with a qualified healthcare professional.
+Doctor recs: 1

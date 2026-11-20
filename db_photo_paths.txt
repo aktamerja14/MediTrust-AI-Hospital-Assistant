@@ -1,0 +1,18 @@
+doctor_id: dr.deven
+photo_path: doctor_photos/dr_deven.jpg
+---
+doctor_id: dr.rahul
+photo_path: doctor_photos/dr_rahul.jpg
+---
+doctor_id: dr.niddhi
+photo_path: doctor_photos/dr_niddhi.jpg
+---
+doctor_id: dr.nita
+photo_path: doctor_photos/dr_neeta.jpg
+---
+doctor_id: dr.suresh
+photo_path: doctor_photos/dr_shuresh.jpg
+---
+doctor_id: dr.mahesh
+photo_path: doctor_photos/dr_mahesh_GyexvM8.jpg
+---

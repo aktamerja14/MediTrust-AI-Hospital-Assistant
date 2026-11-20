@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Markdown Rendering Test</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/chat.css">
+</head>
+<body>
+  <div id="testContainer" style="padding: 2rem; max-width: 800px; margin: 0 auto;"></div>
+
+  <script>
+    // Copy the escapeHtml and renderMarkdown functions from chat.js
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return '';
+      let html = escapeHtml(text);
+      
+      // Headings
+      html = html
+        .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
+        .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
+        .replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+      
+      // Bold and italic
+      html = html
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>');
+      
+      // Bullet lists - convert - items to <li> and wrap consecutive <li> in <ul>
+      html = html.replace(/^\-\s+(.+)$/gm, '<li>$1</li>');
+      
+      // Wrap consecutive <li> elements in <ul>
+      html = html.replace(/(<li>.*?<\/li>)(\s*<li>.*?<\/li>)*/gs, (match) => {
+        return '<ul>' + match + '</ul>';
+      });
+      
+      // Paragraphs - split by double newlines
+      const blocks = html.split(/\n{2,}/);
+      html = blocks.map(block => {
+        block = block.trim();
+        if (!block) return '';
+        // Don't wrap headings, lists, or already wrapped content in <p>
+        if (block.startsWith('<h2>') || block.startsWith('<h3>') || block.startsWith('<h4>') || 
+            block.startsWith('<ul>') || block.startsWith('<ol>')) {
+          return block;
+        }
+        // Replace single newlines with <br> within paragraphs
+        block = block.replace(/\n/g, '<br>');
+        return '<p>' + block + '</p>';
+      }).join('\n');
+      
+      // Clean up empty paragraphs
+      html = html.replace(/<p><\/p>/g, '');
+      html = html.replace(/<p><br>/g, '<p>');
+      html = html.replace(/<br><\/p>/g, '</p>');
+      
+      return html;
+    }
+
+    // Test content from the API
+    const testContent = `Diabetes is a chronic metabolic disorder where blood glucose levels become elevated because the body either doesn\u2019t produce enough insulin (as in Type\u202f1) or cannot use the insulin it makes effectively (as in Type\u202f2).
+
+## What is it?
+- **Type\u202f1 Diabetes** \u2013 autoimmune destruction of pancreatic beta cells; usually diagnosed in children, teens, or young adults; requires lifelong insulin therapy.
+- **Type\u202f2 Diabetes** \u2013 insulin resistance and/or insufficient insulin production; most common form, often linked to overweight, inactivity, and family history; may be managed with lifestyle changes, oral meds, and sometimes insulin.
+- **Gestational Diabetes** \u2013 develops during pregnancy and typically resolves after delivery, but raises future risk of Type\u202f2 diabetes.
+
+## Common Symptoms
+- Frequent urination (especially at night) \u2013 polyuria  
+- Excessive thirst \u2013 polydipsia  
+- Unexplained weight loss  
+- Increased hunger \u2013 polyphagia  
+- Fatigue and weakness  
+- Blurred vision  
+- Slow\u2011healing cuts or bruises  
+- Recurrent infections (skin, gum, bladder, vaginal)  
+- Tingling or numbness in hands and feet (neuropathy)  
+- Dry, itchy skin  
+
+Would you like more details on how diabetes is diagnosed or managed?`;
+
+    const rendered = renderMarkdown(testContent);
+    document.getElementById('testContainer').innerHTML = `
+      <h1>Markdown Rendering Test</h1>
+      <div class="message-assistant" style="max-width: 100%;">
+        <div class="message-bubble">
+          ${rendered}
+        </div>
+        <div class="message-disclaimer" style="margin-top: 1rem; padding: 0.75rem; background: var(--emergency-light); border: 1px solid var(--emergency); border-radius: var(--radius-md); font-size: 0.75rem; color: var(--emergency);">
+          <strong>Disclaimer:</strong> This AI assistant provides general health information only. It is not a substitute for professional medical advice, diagnosis, or treatment. For medical emergencies, call emergency services immediately. For personalized medical advice, consult with a qualified healthcare professional.
+        </div>
+      </div>
+      <hr style="margin: 2rem 0;">
+      <h2>Raw HTML Output</h2>
+      <pre style="background: #f5f5f5; padding: 1rem; overflow: auto; white-space: pre-wrap;">${escapeHtml(rendered)}</pre>
+    `;
+  </script>
+</body>
+</html>

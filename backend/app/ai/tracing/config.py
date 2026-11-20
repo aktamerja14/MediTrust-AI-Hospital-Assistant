@@ -92,7 +92,7 @@ def rag_chain_process_outputs(output: Any) -> Dict[str, Any]:
     """Extract only safe metadata from RAG chain outputs.
 
     Args:
-        output: RAGResponse object or None
+        output: RAGResponse object, dict, or None
 
     Returns:
         Dict with only safe metadata.
@@ -102,12 +102,19 @@ def rag_chain_process_outputs(output: Any) -> Dict[str, Any]:
         if output is None:
             return {"has_context": False, "sources_count": 0}
 
-        # Handle both RAGResponse and dict-like objects
-        has_context = _safe_get(output, "has_context", False)
-        sources = _safe_get(output, "sources", [])
-        model = _safe_get(output, "model", "")
-        doctor_recs = _safe_get(output, "doctor_recommendations", None)
-        disclaimer = _safe_get(output, "disclaimer", "")
+        # Handle both RAGResponse objects and dict outputs
+        if isinstance(output, dict):
+            has_context = _safe_dict_get(output, "has_context", False)
+            sources = _safe_dict_get(output, "sources", [])
+            model = _safe_dict_get(output, "model", "")
+            doctor_recs = _safe_dict_get(output, "doctor_recommendations", None)
+            disclaimer = _safe_dict_get(output, "disclaimer", "")
+        else:
+            has_context = _safe_get(output, "has_context", False)
+            sources = _safe_get(output, "sources", [])
+            model = _safe_get(output, "model", "")
+            doctor_recs = _safe_get(output, "doctor_recommendations", None)
+            disclaimer = _safe_get(output, "disclaimer", "")
 
         scores = []
         if isinstance(sources, list):
@@ -350,3 +357,374 @@ def groq_llm_process_outputs(output: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("groq_llm_process_outputs failed: %s", type(e).__name__)
         return {}
+
+
+# =============================================================================
+# LCEL Runnable Sanitizers (for internal chain steps)
+# =============================================================================
+
+def retriever_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from retriever runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: query, top_k
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"top_k": None}
+
+        top_k = _safe_dict_get(inputs_dict, "top_k")
+        return {"top_k": top_k if isinstance(top_k, int) else None}
+    except Exception as e:
+        logger.warning("retriever_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"top_k": None}
+
+
+def retriever_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from retriever runnable outputs.
+
+    Args:
+        output: Dict with results key containing List[SearchResult]
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, dict):
+            return {"results_count": 0}
+
+        results = output.get("results", [])
+        if not isinstance(results, (list, tuple)):
+            return {"results_count": 0}
+
+        results_count = len(results)
+        scores = []
+        for r in results:
+            score = _safe_get(r, "score")
+            if isinstance(score, (int, float)):
+                scores.append(float(score))
+
+        return {
+            "results_count": results_count,
+            "score_summary": _score_summary(scores),
+        }
+    except Exception as e:
+        logger.warning("retriever_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"results_count": 0, "score_summary": _score_summary([])}
+
+
+def is_medical_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from is_medical runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: query, results, conversation_history, etc.
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"has_results": False}
+
+        results = inputs_dict.get("results", [])
+        return {"has_results": bool(results)}
+    except Exception as e:
+        logger.warning("is_medical_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"has_results": False}
+
+
+def is_medical_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from is_medical runnable outputs.
+
+    Args:
+        output: Dict with is_medical key
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, dict):
+            return {"is_medical": False}
+
+        is_medical = output.get("is_medical", False)
+        return {"is_medical": bool(is_medical)}
+    except Exception as e:
+        logger.warning("is_medical_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"is_medical": False}
+
+
+def detect_specialization_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from detect_specialization runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: query, is_medical, etc.
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"is_medical": False}
+
+        is_medical = inputs_dict.get("is_medical", False)
+        return {"is_medical": bool(is_medical)}
+    except Exception as e:
+        logger.warning("detect_specialization_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"is_medical": False}
+
+
+def detect_specialization_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from detect_specialization runnable outputs.
+
+    Args:
+        output: Dict with specializations key
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, dict):
+            return {"specializations_count": 0}
+
+        specializations = output.get("specializations", [])
+        return {"specializations_count": _safe_len(specializations)}
+    except Exception as e:
+        logger.warning("detect_specialization_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"specializations_count": 0}
+
+
+def build_prompt_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from build_prompt runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: query, results, conversation_history, specializations, is_medical
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"has_results": False, "has_history": False}
+
+        results = inputs_dict.get("results", [])
+        conversation_history = inputs_dict.get("conversation_history")
+        return {
+            "has_results": bool(results),
+            "results_count": _safe_len(results),
+            "has_history": bool(conversation_history),
+            "history_length": _safe_len(conversation_history),
+        }
+    except Exception as e:
+        logger.warning("build_prompt_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"has_results": False, "has_history": False}
+
+
+def build_prompt_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from build_prompt runnable outputs.
+
+    Args:
+        output: Dict with system_prompt, user_prompt, has_context
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, dict):
+            return {"has_context": False}
+
+        has_context = output.get("has_context", False)
+        has_system_prompt = bool(output.get("system_prompt"))
+        has_user_prompt = bool(output.get("user_prompt"))
+        return {
+            "has_context": bool(has_context),
+            "has_system_prompt": has_system_prompt,
+            "has_user_prompt": has_user_prompt,
+        }
+    except Exception as e:
+        logger.warning("build_prompt_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"has_context": False}
+
+
+def llm_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from llm runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: system_prompt, user_prompt
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"has_system_prompt": False, "has_user_prompt": False}
+
+        has_system_prompt = bool(inputs_dict.get("system_prompt"))
+        has_user_prompt = bool(inputs_dict.get("user_prompt"))
+        return {
+            "has_system_prompt": has_system_prompt,
+            "has_user_prompt": has_user_prompt,
+        }
+    except Exception as e:
+        logger.warning("llm_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"has_system_prompt": False, "has_user_prompt": False}
+
+
+def llm_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from llm runnable outputs.
+
+    Args:
+        output: Dict with answer key
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, dict):
+            return {"has_answer": False}
+
+        has_answer = bool(output.get("answer"))
+        return {"has_answer": has_answer}
+    except Exception as e:
+        logger.warning("llm_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"has_answer": False}
+
+
+def format_sources_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from format_sources runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: results, etc.
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"has_results": False}
+
+        results = inputs_dict.get("results", [])
+        return {"has_results": bool(results), "results_count": _safe_len(results)}
+    except Exception as e:
+        logger.warning("format_sources_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"has_results": False}
+
+
+def format_sources_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from format_sources runnable outputs.
+
+    Args:
+        output: List of source dicts
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, (list, tuple)):
+            return {"sources_count": 0}
+
+        return {"sources_count": len(output)}
+    except Exception as e:
+        logger.warning("format_sources_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"sources_count": 0}
+
+
+def doctor_recommendations_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from doctor_recommendations runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: is_medical, specializations, db, has_context
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"is_medical": False, "has_specializations": False}
+
+        is_medical = inputs_dict.get("is_medical", False)
+        specializations = inputs_dict.get("specializations", [])
+        has_context = inputs_dict.get("has_context", False)
+        return {
+            "is_medical": bool(is_medical),
+            "has_specializations": bool(specializations),
+            "specializations_count": _safe_len(specializations),
+            "has_context": bool(has_context),
+        }
+    except Exception as e:
+        logger.warning("doctor_recommendations_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"is_medical": False, "has_specializations": False}
+
+
+def doctor_recommendations_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from doctor_recommendations runnable outputs.
+
+    Args:
+        output: Dict with doctor_recommendations, disclaimer
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(output, dict):
+            return {"has_doctor_recommendations": False, "has_disclaimer": False}
+
+        doctor_recs = output.get("doctor_recommendations", [])
+        disclaimer = output.get("disclaimer", "")
+        return {
+            "has_doctor_recommendations": bool(doctor_recs) and _safe_len(doctor_recs) > 0,
+            "doctor_recommendations_count": _safe_len(doctor_recs),
+            "has_disclaimer": bool(disclaimer),
+        }
+    except Exception as e:
+        logger.warning("doctor_recommendations_runnable_process_outputs failed: %s", type(e).__name__)
+        return {"has_doctor_recommendations": False, "has_disclaimer": False}
+
+
+def final_response_runnable_process_inputs(inputs_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract only safe metadata from final_response runnable inputs.
+
+    Args:
+        inputs_dict: Dict with keys: answer, sources, has_context, doctor_recommendations, disclaimer, langsmith_run_id, langsmith_trace_id
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    try:
+        if not isinstance(inputs_dict, dict):
+            return {"has_answer": False, "has_sources": False}
+
+        has_answer = bool(inputs_dict.get("answer"))
+        sources = inputs_dict.get("sources", [])
+        has_context = inputs_dict.get("has_context", False)
+        doctor_recs = inputs_dict.get("doctor_recommendations", [])
+        disclaimer = inputs_dict.get("disclaimer", "")
+        has_run_id = bool(inputs_dict.get("langsmith_run_id"))
+        has_trace_id = bool(inputs_dict.get("langsmith_trace_id"))
+        return {
+            "has_answer": has_answer,
+            "has_sources": bool(sources),
+            "sources_count": _safe_len(sources),
+            "has_context": bool(has_context),
+            "has_doctor_recommendations": bool(doctor_recs) and _safe_len(doctor_recs) > 0,
+            "has_disclaimer": bool(disclaimer),
+            "has_run_id": has_run_id,
+            "has_trace_id": has_trace_id,
+        }
+    except Exception as e:
+        logger.warning("final_response_runnable_process_inputs failed: %s", type(e).__name__)
+        return {"has_answer": False, "has_sources": False}
+
+
+def final_response_runnable_process_outputs(output: Any) -> Dict[str, Any]:
+    """Extract only safe metadata from final_response runnable outputs.
+
+    Args:
+        output: RAGResponse object
+
+    Returns:
+        Dict with only safe metadata.
+    """
+    return rag_chain_process_outputs(output)
