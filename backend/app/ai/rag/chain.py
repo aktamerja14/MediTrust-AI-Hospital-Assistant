@@ -374,6 +374,7 @@ def _make_format_sources_runnable():
                 "page": str(page_val),
                 "score": round(result.score, 4),
                 "content_preview": doc.content[:200] + "..." if len(doc.content) > 200 else doc.content,
+                "full_content": doc.content,
             })
         return sources
 
