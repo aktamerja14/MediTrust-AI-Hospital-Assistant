@@ -1,8 +1,13 @@
-"""Native LangSmith Experiment Integration for MediTrust RAG Evaluation (Phase 6.1).
+"""Native LangSmith Experiment Integration for MediTrust RAG Evaluation (Phase 6.1/6.2).
 
 This module provides native LangSmith experiment integration using the official
 `langsmith.evaluation.evaluate()` API. It wraps existing Phase 4 programmatic
 evaluators and Phase 5 LLM judges as LangSmith-compatible evaluators.
+
+Phase 6.2 improvements:
+- Eliminates duplicate RAG/evaluator execution by using native results as single source of truth
+- Adds feedback ID tracking and mapping
+- Adds PHI/sensitive data sanitization for all LangSmith uploads
 """
 import asyncio
 import json
@@ -58,22 +63,22 @@ from app.ai.evaluation.langsmith_utils import (
     LangSmithUploadError,
     list_datasets,
 )
-from app.ai.evaluation.dataset_schema import (
-    EvaluationCase,
-    load_dataset,
-    validate_case,
-    get_dataset_stats,
-)
 from app.ai.evaluation.validation import validate_dataset
-from app.ai.evaluation.pipeline import (
-    EvaluationResult as PipelineEvaluationResult,
-    PipelineSummary,
-    OfflineEvaluationPipeline,
-    run_offline_evaluation,
-)
 from app.ai.rag.chain import RAGChain, RAGResponse
 
 logger = logging.getLogger("meditrust.ai.evaluation.langsmith_native")
+
+from app.ai.evaluation.langsmith_utils import (
+    detect_sensitive_data,
+    sanitize_text,
+    sanitize_dict,
+    validate_no_sensitive_data,
+    validate_dict_no_sensitive_data,
+    SanitizationError,
+    _sanitize_case_for_upload,
+    sanitize_experiment_payload,
+    ExperimentSanitizationError,
+)
 
 
 # =============================================================================
@@ -141,26 +146,32 @@ class ProgrammaticEvaluatorWrapper(RunEvaluator):
 
             value = result.status.value
 
+            # PHI protection: evaluator comments/metadata are uploaded as
+            # LangSmith feedback, so sanitize before returning them.
+            safe_issues = [sanitize_text(str(issue)) for issue in (result.issues or [])]
+            safe_metadata = sanitize_dict(result.metadata) if result.metadata else {}
+
             return LangSmithEvaluationResult(
                 key=self._evaluator_name,
                 score=score,
                 value=value,
-                comment=result.reason,
+                comment=sanitize_text(result.reason or ""),
                 metadata={
-                    "issues": result.issues,
+                    "issues": safe_issues,
                     "evaluator_status": result.status.value,
                     "passed": result.passed,
-                    **result.metadata,
+                    **safe_metadata,
                 }
             )
         except Exception as e:
             logger.exception("Programmatic evaluator %s failed: %s", self._evaluator_name, e)
+            safe_error = sanitize_text(str(e))
             return LangSmithEvaluationResult(
                 key=self._evaluator_name,
                 score=None,
                 value="error",
-                comment=f"Evaluator error: {str(e)}",
-                metadata={"error": str(e)}
+                comment=f"Evaluator error: {safe_error}",
+                metadata={"error": safe_error}
             )
 
 
@@ -236,14 +247,19 @@ class LLMJudgeWrapper(RunEvaluator):
                 else:
                     score = None
 
+            # PHI protection: judge reasoning/evidence are uploaded as
+            # LangSmith feedback, so sanitize before returning them.
+            safe_evidence = [sanitize_text(str(item)) for item in (result.evidence or [])]
+            safe_issues = [sanitize_text(str(issue)) for issue in (result.issues or [])]
+
             return LangSmithEvaluationResult(
                 key=self._judge_name,
                 score=score,
                 value=status_value,
-                comment=result.reasoning,
+                comment=sanitize_text(result.reasoning or ""),
                 metadata={
-                    "evidence": result.evidence,
-                    "issues": result.issues,
+                    "evidence": safe_evidence,
+                    "issues": safe_issues,
                     "confidence": result.confidence,
                     "judge_model": result.judge_model,
                     "judge_provider": result.judge_provider,
@@ -251,12 +267,13 @@ class LLMJudgeWrapper(RunEvaluator):
             )
         except Exception as e:
             logger.exception("LLM judge %s failed: %s", self._judge_name, e)
+            safe_error = sanitize_text(str(e))
             return LangSmithEvaluationResult(
                 key=self._judge_name,
                 score=None,
                 value="error",
-                comment=f"Judge error: {str(e)}",
-                metadata={"error": str(e)}
+                comment=f"Judge error: {safe_error}",
+                metadata={"error": safe_error}
             )
 
 
@@ -277,10 +294,16 @@ class RAGChainTarget:
         return self._rag_chain
 
     async def __call__(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """LangSmith target interface - takes inputs dict, returns outputs dict."""
+        """LangSmith target interface - takes inputs dict, returns outputs dict.
+
+        Phase 6.3: Fail-closed PHI sanitization on the entire output dict before
+        it is transmitted to LangSmith as a run output.
+        """
         question = inputs.get("question", "")
         conversation_history = inputs.get("conversation_history")
         top_k = inputs.get("top_k")
+        # Use example-level case_id for redacted log messages when available.
+        case_id = str(inputs.get("case_id", inputs.get("example_id", "unknown")))
 
         try:
             response = await self.rag_chain.generate(
@@ -289,9 +312,10 @@ class RAGChainTarget:
                 top_k=top_k,
             )
 
-            return {
-                "answer": response.answer,
-                "sources": response.sources,
+            # Build the raw output dict.
+            raw_output = {
+                "answer": response.answer or "",
+                "sources": response.sources or [],
                 "has_context": response.has_context,
                 "model": response.model,
                 "doctor_recommendations": response.doctor_recommendations or [],
@@ -299,6 +323,25 @@ class RAGChainTarget:
                 "langsmith_run_id": response.langsmith_run_id,
                 "langsmith_trace_id": response.langsmith_trace_id,
             }
+
+            # Fail-closed: sanitize and re-validate before handing to LangSmith.
+            safe_output = sanitize_experiment_payload(
+                raw_output,
+                case_id=case_id,
+                fields=["answer", "disclaimer", "error_message"],
+            )
+            # Sources are dicts — sanitize recursively.
+            safe_output["sources"] = sanitize_dict(
+                {"sources": safe_output.get("sources", [])}
+            ).get("sources", [])
+            safe_output["doctor_recommendations"] = sanitize_dict(
+                {"items": safe_output.get("doctor_recommendations", [])}
+            ).get("items", [])
+            return safe_output
+
+        except ExperimentSanitizationError:
+            # Re-raise immediately — do not send anything to LangSmith.
+            raise
         except Exception as e:
             logger.exception("RAG chain generation failed: %s", e)
             return {
@@ -308,7 +351,7 @@ class RAGChainTarget:
                 "model": "",
                 "doctor_recommendations": [],
                 "disclaimer": "",
-                "error_message": str(e),
+                "error_message": sanitize_text(str(e)),
             }
 
 
@@ -330,6 +373,35 @@ class NativeExperimentConfig:
     experiment_prefix: Optional[str] = None
     description: Optional[str] = None
     num_repetitions: int = 1
+    project: Optional[str] = None  # Phase 6.3: LangSmith project name
+
+
+@dataclass
+class NativeExampleResult:
+    """Per-example result extracted from a native LangSmith experiment row."""
+    example_id: str
+    run_id: str
+    question: str
+    expected_answer: str
+    actual_answer: str
+    reference_context: str
+    retrieved_context: str = ""
+    category: str = "general_info"
+    language: str = "en"
+    tags: List[str] = field(default_factory=list)
+    execution_status: str = "success"
+    evaluator_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    execution_time_ms: float = 0.0
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    error_message: Optional[str] = None
+    sources: List[Dict[str, Any]] = field(default_factory=list)
+    has_context: bool = False
+    model: str = ""
+    doctor_recommendations: List[Dict[str, Any]] = field(default_factory=list)
+    disclaimer: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -343,12 +415,14 @@ class NativeExperimentResult:
     failed: int = 0
     errors: int = 0
     execution_time_ms: float = 0.0
+    duration_seconds: float = 0.0
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     evaluator_summary: Dict[str, Any] = field(default_factory=dict)
     langsmith_experiment_url: Optional[str] = None
     run_ids: List[str] = field(default_factory=list)
     dataset_id: Optional[str] = None
     feedback_ids: List[str] = field(default_factory=list)
+    feedback_mapping: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -366,10 +440,11 @@ class NativeLangSmithExperimentRunner:
     ):
         self.config = config
         self._rag_chain = rag_chain
-        self.client = client or create_langsmith_client(api_key)
+        self.client = client or create_langsmith_client(api_key, project=config.project)
         self._target: Optional[RAGChainTarget] = None
         self._programmatic_evaluators: Dict[str, ProgrammaticEvaluatorWrapper] = {}
         self._llm_judges: Dict[str, LLMJudgeWrapper] = {}
+        self._feedback_mapping: List[Dict[str, Any]] = []
 
     @property
     def rag_chain(self) -> RAGChain:
@@ -428,7 +503,12 @@ class NativeLangSmithExperimentRunner:
         return evaluators
 
     async def run_experiment(self) -> tuple[List[Dict[str, Any]], NativeExperimentResult]:
-        """Run the native LangSmith experiment using the official evaluate() API."""
+        """Run the native LangSmith experiment using the official evaluate() API.
+        
+        Phase 6.2: Uses native LangSmith experiment results as the single source of truth.
+        Does NOT re-run RAG generation or evaluators locally - extracts results from
+        the native experiment to build local summary reports.
+        """
         logger.info(
             "Starting native LangSmith experiment '%s' on dataset '%s'",
             self.config.experiment_name, self.config.dataset_name
@@ -436,7 +516,19 @@ class NativeLangSmithExperimentRunner:
 
         start_time = datetime.utcnow()
 
-        target = self.target
+        raw_target = self.target
+        if hasattr(raw_target, "ainvoke"):
+            async def target(inputs: dict) -> dict:
+                return await raw_target.ainvoke(inputs)
+        elif hasattr(raw_target, "invoke"):
+            def target(inputs: dict) -> dict:
+                return raw_target.invoke(inputs)
+        elif callable(raw_target):
+            async def target(inputs: dict) -> dict:
+                res = raw_target(inputs)
+                return await res if hasattr(res, "__await__") else res
+        else:
+            target = raw_target
         evaluators = self._get_evaluator_list()
 
         logger.info(
@@ -445,15 +537,10 @@ class NativeLangSmithExperimentRunner:
         )
 
         try:
-            start_time = datetime.utcnow()
-
             experiment_results = await aevaluate(
-                target=target,
+                target,
                 data=self.config.dataset_name,
                 evaluators=evaluators,
-                evaluator_config={
-                    "max_concurrency": self.config.max_concurrent,
-                },
                 experiment_prefix=self.config.experiment_prefix,
                 description=self.config.description,
                 max_concurrency=self.config.max_concurrent,
@@ -470,46 +557,41 @@ class NativeLangSmithExperimentRunner:
 
             run_ids = []
             feedback_ids = []
+            feedback_mapping = []
 
+            # Collect experiment rows to extract results
+            experiment_rows = []
             async for row in experiment_results:
                 if row.get("run"):
                     run_ids.append(str(row["run"].id))
+                experiment_rows.append(row)
 
             logger.info(
                 "Native LangSmith experiment completed: experiment_id=%s, runs=%d",
                 experiment_id, len(run_ids)
             )
 
-            example_results = await self._evaluate_examples_locally()
+            # Extract evaluation results from native experiment rows (single source of truth)
+            example_results = await self._extract_results_from_experiment(
+                experiment_rows, run_ids
+            )
 
-            programmatic_results = await self._run_programmatic_on_examples(example_results)
-            llm_judge_results = await self._run_llm_judges_on_examples(example_results)
-
-            combined_results = {}
-            all_evaluator_names = set()
-            for example_id, eval_results in programmatic_results.items():
-                combined_results[example_id] = {}
-                for eval_name, eval_result in eval_results.items():
-                    combined_results[example_id][eval_name] = eval_result
-                    all_evaluator_names.add(eval_name)
-
-            for example_id, eval_results in llm_judge_results.items():
-                if example_id not in combined_results:
-                    combined_results[example_id] = {}
-                for eval_name, eval_result in eval_results.items():
-                    combined_results[example_id][eval_name] = eval_result
-                    all_evaluator_names.add(eval_name)
+            # Retrieve feedback IDs from LangSmith (mapped to run/evaluator)
+            feedback_ids = await self._retrieve_feedback_ids(experiment_id, run_ids)
+            feedback_mapping = list(self._feedback_mapping)
 
             total = len(example_results)
-            successful = sum(1 for r in example_results if r.get("execution_status") == "success")
-            failed = sum(1 for r in example_results if r.get("execution_status") == "failed")
-            errors = sum(1 for r in example_results if r.get("execution_status") == "error")
+            successful = sum(1 for r in example_results if r.execution_status == "success")
+            failed = sum(1 for r in example_results if r.execution_status == "failed")
+            errors = sum(1 for r in example_results if r.execution_status == "error")
 
-            execution_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            duration_seconds = (datetime.utcnow() - start_time).total_seconds()
+            execution_time_ms = duration_seconds * 1000
 
-            evaluator_summary = self._compute_evaluator_summary(
-                example_results, programmatic_results, llm_judge_results
-            )
+            evaluator_results_by_example = {
+                r.example_id: r.evaluator_results for r in example_results
+            }
+            evaluator_summary = self._compute_evaluator_summary_from_native(evaluator_results_by_example)
 
             summary = NativeExperimentResult(
                 experiment_name=self.config.experiment_name,
@@ -520,30 +602,16 @@ class NativeLangSmithExperimentRunner:
                 failed=failed,
                 errors=errors,
                 execution_time_ms=execution_time_ms,
+                duration_seconds=duration_seconds,
                 evaluator_summary=evaluator_summary,
                 langsmith_experiment_url=experiment_url,
                 run_ids=run_ids,
                 dataset_id=dataset_id,
                 feedback_ids=feedback_ids,
+                feedback_mapping=feedback_mapping,
             )
 
-            detailed_results = []
-            for i, ex_result in enumerate(example_results):
-                example_id = str(ex_result.get("example_id", f"unknown-{i}"))
-                detailed_results.append({
-                    "example_id": example_id,
-                    "question": ex_result.get("question", ""),
-                    "expected_answer": ex_result.get("expected_answer", ""),
-                    "actual_answer": ex_result.get("actual_answer", ""),
-                    "reference_context": ex_result.get("reference_context", ""),
-                    "retrieved_context": ex_result.get("retrieved_context", ""),
-                    "category": ex_result.get("category", "general_info"),
-                    "execution_status": ex_result.get("execution_status", "error"),
-                    "evaluator_results": combined_results.get(example_id, {}),
-                    "execution_time_ms": ex_result.get("execution_time_ms", 0.0),
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "error_message": ex_result.get("error_message"),
-                })
+            detailed_results = [r.to_dict() for r in example_results]
 
             return detailed_results, summary
 
@@ -551,343 +619,222 @@ class NativeLangSmithExperimentRunner:
             logger.exception("Native experiment failed: %s", e)
             raise
 
-    async def _evaluate_examples_locally(self) -> List[Dict[str, Any]]:
-        """Evaluate examples locally to get RAG outputs for programmatic evaluation."""
-        examples = list(self.client.list_examples(
-            dataset_name=self.config.dataset_name,
-            limit=self.config.max_examples,
-        ))
+    @staticmethod
+    def _row_get(obj: Any, key: str, default: Any = None) -> Any:
+        """Read a field from either a dict-like row or an SDK model object."""
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
 
-        logger.info("Fetched %d examples from dataset '%s'",
-                   len(examples), self.config.dataset_name)
+    @classmethod
+    def _as_dict(cls, value: Any) -> Dict[str, Any]:
+        return value if isinstance(value, dict) else {}
 
-        semaphore = asyncio.Semaphore(self.config.max_concurrent)
+    async def _extract_results_from_experiment(
+        self,
+        experiment_rows: List[Dict[str, Any]],
+        run_ids: List[str],
+    ) -> List[NativeExampleResult]:
+        """Extract example results and evaluator results from native experiment rows.
 
-        async def run_with_semaphore(example: Example) -> Dict[str, Any]:
-            async with semaphore:
-                return await self._evaluate_single_example(example)
+        This uses the native LangSmith experiment results as the single source of
+        truth, avoiding duplicate RAG generation and evaluator execution. Each
+        ExperimentResultRow already contains the example, the run, and the
+        evaluator feedback produced by LangSmith, so no second local run is needed.
 
-        tasks = [run_with_semaphore(ex) for ex in examples]
-        example_results = await asyncio.gather(*tasks, return_exceptions=False)
+        Args:
+            experiment_rows: Rows from the native experiment results iterator
+            run_ids: List of run IDs from the experiment (kept for compatibility)
+
+        Returns:
+            List of NativeExampleResult objects, one per experiment row
+        """
+        example_results: List[NativeExampleResult] = []
+
+        for row in experiment_rows:
+            run = self._row_get(row, "run")
+            example = self._row_get(row, "example")
+            if run is None or example is None:
+                continue
+
+            run_id = str(self._row_get(run, "id", ""))
+            example_id = str(self._row_get(example, "id", run_id))
+            run_outputs = self._as_dict(self._row_get(run, "outputs", {}))
+            example_inputs = self._as_dict(self._row_get(example, "inputs", {}))
+            example_outputs = self._as_dict(self._row_get(example, "outputs", {}))
+
+            # LangSmith returns EvaluationResults = {"results": [EvaluationResult, ...]}
+            raw_eval = self._row_get(row, "evaluation_results", {})
+            raw_results = []
+            if isinstance(raw_eval, dict):
+                raw_results = raw_eval.get("results", [])
+            elif isinstance(raw_eval, list):
+                raw_results = raw_eval
+
+            evaluator_results = {}
+            for eval_result in raw_results:
+                eval_name = self._row_get(eval_result, "key")
+                if not eval_name:
+                    continue
+                metadata = self._as_dict(self._row_get(eval_result, "metadata", {}))
+                value = self._row_get(eval_result, "value")
+                passed = metadata.get("passed")
+                if passed is None:
+                    if value == "passed":
+                        passed = True
+                    elif value == "failed":
+                        passed = False
+
+                evaluator_results[str(eval_name)] = {
+                    "score": self._row_get(eval_result, "score"),
+                    "passed": passed,
+                    "status": value if value is not None else metadata.get("evaluator_status", "error"),
+                    "reason": sanitize_text(str(self._row_get(eval_result, "comment", "") or "")),
+                    "issues": [
+                        sanitize_text(str(issue))
+                        for issue in (metadata.get("issues") or [])
+                    ],
+                    "confidence": metadata.get("confidence"),
+                    "metadata": sanitize_dict(metadata) if metadata else {},
+                }
+
+            example_results.append(NativeExampleResult(
+                example_id=example_id,
+                run_id=run_id,
+                question=sanitize_text(str(example_inputs.get("question", "") or "")),
+                evaluator_results=evaluator_results,
+                expected_answer=sanitize_text(str(example_outputs.get("expected_answer", "") or "")),
+                actual_answer=sanitize_text(str(
+                    run_outputs.get("answer", "") or run_outputs.get("actual_answer", "") or ""
+                )),
+                reference_context=sanitize_text(str(example_outputs.get("reference_context", "") or "")),
+                retrieved_context=sanitize_text(str(run_outputs.get("retrieved_context", "") or "")),
+                category=example_inputs.get("category", "general_info"),
+                language=example_inputs.get("language", "en"),
+                tags=example_inputs.get("tags", []),
+                execution_status="success" if run_outputs.get("answer") else "failed",
+                error_message=sanitize_text(str(run_outputs.get("error_message") or "")) or None,
+                sources=sanitize_dict({"sources": run_outputs.get("sources", [])}).get("sources", []),
+                has_context=run_outputs.get("has_context", False),
+                model=run_outputs.get("model", ""),
+                doctor_recommendations=sanitize_dict(
+                    {"items": run_outputs.get("doctor_recommendations", [])}
+                ).get("items", []),
+                disclaimer=sanitize_text(str(run_outputs.get("disclaimer", "") or "")),
+                execution_time_ms=0.0,  # Not available from native experiment
+            ))
 
         return example_results
 
-    async def _evaluate_single_example(self, example: Example) -> Dict[str, Any]:
-        """Evaluate a single example through the RAG pipeline and return results."""
-        start_time = datetime.utcnow()
-
-        try:
-            pipeline_result = await self._run_rag_generation(example)
-
-            execution_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-
-            return {
-                "example_id": str(example.id),
-                "question": example.inputs.get("question", ""),
-                "expected_answer": example.outputs.get("expected_answer", ""),
-                "actual_answer": pipeline_result.get("actual_answer", ""),
-                "reference_context": example.outputs.get("reference_context", ""),
-                "retrieved_context": pipeline_result.get("retrieved_context", ""),
-                "category": example.inputs.get("category", "general_info"),
-                "language": example.inputs.get("language", "en"),
-                "tags": example.inputs.get("tags", []),
-                "execution_status": pipeline_result.get("execution_status", "success"),
-                "error_message": pipeline_result.get("error_message"),
-                "sources": pipeline_result.get("sources", []),
-                "has_context": pipeline_result.get("has_context", False),
-                "model": pipeline_result.get("model", ""),
-                "doctor_recommendations": pipeline_result.get("doctor_recommendations", []),
-                "disclaimer": pipeline_result.get("disclaimer", ""),
-                "execution_time_ms": execution_time_ms,
-            }
-
-        except Exception as e:
-            logger.exception("Error evaluating example %s: %s", example.id, e)
-            execution_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
-            return {
-                "example_id": str(example.id),
-                "question": example.inputs.get("question", ""),
-                "expected_answer": example.outputs.get("expected_answer", ""),
-                "actual_answer": "",
-                "reference_context": example.outputs.get("reference_context", ""),
-                "retrieved_context": "",
-                "category": example.inputs.get("category", "general_info"),
-                "language": example.inputs.get("language", "en"),
-                "tags": example.inputs.get("tags", []),
-                "execution_status": "error",
-                "error_message": str(e),
-                "sources": [],
-                "has_context": False,
-                "model": "",
-                "doctor_recommendations": [],
-                "disclaimer": "",
-                "execution_time_ms": execution_time_ms,
-            }
-
-    async def _run_rag_generation(self, example: Example) -> Dict[str, Any]:
-        """Run RAG generation for a single example."""
-        try:
-            rag_response = await self.rag_chain.generate(
-                query=example.inputs.get("question", ""),
-                top_k=self.config.top_k if hasattr(self.config, 'top_k') else None,
-            )
-
-            retrieved_context = self._extract_retrieved_context(rag_response)
-
-            if not rag_response.answer or not rag_response.answer.strip():
-                execution_status = "failed"
-                error_message = "Empty response from RAG chain"
-            else:
-                execution_status = "success"
-                error_message = None
-
-            return {
-                "actual_answer": rag_response.answer,
-                "retrieved_context": retrieved_context,
-                "execution_status": execution_status,
-                "error_message": error_message,
-                "sources": rag_response.sources,
-                "has_context": rag_response.has_context,
-                "model": rag_response.model,
-                "doctor_recommendations": rag_response.doctor_recommendations or [],
-                "disclaimer": rag_response.disclaimer or "",
-                "execution_time_ms": 0.0,
-            }
-
-        except Exception as e:
-            logger.exception("RAG generation failed for example: %s", e)
-            return {
-                "actual_answer": "",
-                "retrieved_context": "",
-                "execution_status": "error",
-                "error_message": str(e),
-                "sources": [],
-                "has_context": False,
-                "model": "",
-                "doctor_recommendations": [],
-                "disclaimer": "",
-                "execution_time_ms": 0.0,
-            }
-
-    def _extract_retrieved_context(self, rag_response: RAGResponse) -> str:
-        """Extract retrieved context from RAG response sources."""
-        if not rag_response.sources:
-            return ""
-
-        context_parts = []
-        for source in rag_response.sources:
-            preview = source.get("content_preview", "")
-            if preview:
-                context_parts.append(preview)
-
-        return "\n\n".join(context_parts)
-
-    async def _run_programmatic_on_examples(self, example_results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict]]:
-        """Run programmatic evaluators on all example results.
-
-        Returns:
-            Dict mapping example_id -> evaluator_name -> evaluator_result_dict
-        """
-        results: Dict[str, Dict[str, Dict]] = {}
-
-        evaluator_names = self.config.evaluator_names or []
-        if not evaluator_names and self.config.include_programmatic:
-            evaluator_names = list(PROGRAMMATIC_DEFAULT_EVALUATORS)
-
-        for name in evaluator_names:
-            if name not in PROGRAMMATIC_EVALUATORS:
-                continue
-
-            evaluator_func = get_programmatic_evaluator(name)
-
-            for ex_result in example_results:
-                example_id = ex_result.get("example_id", "unknown")
-
-                pipeline_result = PipelineEvaluationResult(
-                    evaluation_id=example_id,
-                    question=ex_result.get("question", ""),
-                    expected_answer=ex_result.get("expected_answer", ""),
-                    actual_answer=ex_result.get("actual_answer", ""),
-                    reference_context=ex_result.get("reference_context", ""),
-                    retrieved_context=ex_result.get("retrieved_context", ""),
-                    category=ex_result.get("category", "general_info"),
-                    language=ex_result.get("language", "en"),
-                    tags=ex_result.get("tags", []),
-                    execution_status=ex_result.get("execution_status", "success"),
-                    error_message=ex_result.get("error_message"),
-                    sources=ex_result.get("sources", []),
-                    has_context=ex_result.get("has_context", False),
-                    model=ex_result.get("model", ""),
-                    doctor_recommendations=ex_result.get("doctor_recommendations", []),
-                    disclaimer=ex_result.get("disclaimer", ""),
-                    execution_time_ms=ex_result.get("execution_time_ms", 0.0),
-                )
-
-                try:
-                    result = evaluator_func(pipeline_result)
-
-                    score = result.score
-                    if score is None:
-                        if result.status == EvaluationStatus.PASSED:
-                            score = 1.0
-                        elif result.status == EvaluationStatus.FAILED:
-                            score = 0.0
-                        else:
-                            score = None
-
-                    eval_result = {
-                        "score": score,
-                        "passed": result.passed,
-                        "status": result.status.value,
-                        "reason": result.reason,
-                        "issues": result.issues,
-                        "metadata": result.metadata,
-                    }
-
-                    if example_id not in results:
-                        results[example_id] = {}
-                    results[example_id][name] = eval_result
-
-                except Exception as e:
-                    logger.exception("Evaluator %s failed for case: %s", name, e)
-                    eval_result = {
-                        "score": None,
-                        "passed": None,
-                        "status": "error",
-                        "reason": f"Evaluator error: {str(e)}",
-                        "issues": [str(e)],
-                        "metadata": {"error": str(e)},
-                    }
-                    if example_id not in results:
-                        results[example_id] = {}
-                    results[example_id][name] = eval_result
-
-        return results
-
-    async def _run_llm_judges_on_examples(self, example_results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict]]:
-        """Run LLM judges on all example results.
-
-        Returns:
-            Dict mapping example_id -> evaluator_name -> evaluator_result_dict
-        """
-        results: Dict[str, Dict[str, Dict]] = {}
-
-        evaluator_names = self.config.evaluator_names or []
-        if not evaluator_names and self.config.include_llm_judges:
-            evaluator_names = list(LLM_DEFAULT_EVALUATORS)
-
-        for name in evaluator_names:
-            if name not in LLM_JUDGES:
-                continue
-
-            judge_class = LLM_JUDGES[name]
-            judge = judge_class()
-
-            for ex_result in example_results:
-                example_id = ex_result.get("example_id", "unknown")
-
-                pipeline_result = PipelineEvaluationResult(
-                    evaluation_id=example_id,
-                    question=ex_result.get("question", ""),
-                    expected_answer=ex_result.get("expected_answer", ""),
-                    actual_answer=ex_result.get("actual_answer", ""),
-                    reference_context=ex_result.get("reference_context", ""),
-                    retrieved_context=ex_result.get("retrieved_context", ""),
-                    category=ex_result.get("category", "general_info"),
-                    language=ex_result.get("language", "en"),
-                    tags=ex_result.get("tags", []),
-                    execution_status=ex_result.get("execution_status", "success"),
-                    error_message=ex_result.get("error_message"),
-                    sources=ex_result.get("sources", []),
-                    has_context=ex_result.get("has_context", False),
-                    model=ex_result.get("model", ""),
-                    doctor_recommendations=ex_result.get("doctor_recommendations", []),
-                    disclaimer=ex_result.get("disclaimer", ""),
-                    execution_time_ms=ex_result.get("execution_time_ms", 0.0),
-                )
-
-                try:
-                    result = await judge.evaluate(pipeline_result)
-
-                    score = result.score
-                    if score is None:
-                        if result.status == JudgeStatus.PASSED:
-                            score = 1.0
-                        elif result.status == JudgeStatus.FAILED:
-                            score = 0.0
-                        else:
-                            score = None
-
-                    eval_result = {
-                        "score": score,
-                        "passed": result.passed,
-                        "status": result.status.value,
-                        "reasoning": result.reasoning,
-                        "evidence": result.evidence,
-                        "issues": result.issues,
-                        "confidence": result.confidence,
-                        "judge_model": result.judge_model,
-                        "judge_provider": result.judge_provider,
-                        "metadata": result.metadata,
-                    }
-
-                    if example_id not in results:
-                        results[example_id] = {}
-                    results[example_id][name] = eval_result
-
-                except Exception as e:
-                    logger.exception("LLM judge %s failed: %s", name, e)
-                    eval_result = {
-                        "score": None,
-                        "passed": None,
-                        "status": "error",
-                        "reasoning": f"Judge error: {str(e)}",
-                        "evidence": [],
-                        "issues": [str(e)],
-                        "confidence": 0.0,
-                        "judge_model": "",
-                        "judge_provider": "",
-                        "metadata": {"error": str(e)},
-                    }
-                    if example_id not in results:
-                        results[example_id] = {}
-                    results[example_id][name] = eval_result
-
-        return results
-
-    def _compute_evaluator_summary(
+    async def _retrieve_feedback_ids(
         self,
-        example_results: List[Dict[str, Any]],
-        programmatic_results: Dict[str, Dict[str, Dict]],
-        llm_judge_results: Dict[str, Dict[str, Dict]],
+        experiment_id: str,
+        run_ids: List[str],
+    ) -> List[str]:
+        """Retrieve feedback IDs from LangSmith for the experiment runs.
+        
+        Uses the public LangSmith SDK API to fetch feedback records and maps them
+        to experiment ID, run ID, example ID, evaluator name, and score.
+        
+        Args:
+            experiment_id: The experiment ID
+            run_ids: List of run IDs from the experiment
+            
+        Returns:
+            List of feedback IDs
+        """
+        self._feedback_mapping = []
+        feedback_ids: List[str] = []
+
+        if not run_ids:
+            return feedback_ids
+
+        try:
+            # LangSmith SDK v0.15.0 public API supports filtering by run IDs.
+            feedback_records = list(self.client.list_feedback(run_ids=run_ids))
+
+            for feedback in feedback_records:
+                feedback_id = str(getattr(feedback, "id", "") or "")
+                run_id = str(getattr(feedback, "run_id", "") or "")
+                if feedback_id:
+                    feedback_ids.append(feedback_id)
+
+                # Map feedback -> run/evaluator. Comment is sanitized because
+                # it may echo answer/context text.
+                self._feedback_mapping.append({
+                    "feedback_id": feedback_id,
+                    "experiment_id": experiment_id,
+                    "run_id": run_id,
+                    "example_id": str(getattr(feedback, "example_id", "") or ""),
+                    "evaluator_name": str(getattr(feedback, "key", "") or ""),
+                    "score": getattr(feedback, "score", None),
+                    "value": getattr(feedback, "value", ""),
+                    "comment": sanitize_text(str(getattr(feedback, "comment", "") or "")),
+                })
+
+            logger.info(
+                "Retrieved %d feedback records for experiment %s",
+                len(feedback_ids), experiment_id
+            )
+            for mapping in self._feedback_mapping:
+                logger.debug(
+                    "Feedback mapping: run=%s, evaluator=%s, score=%s",
+                    mapping["run_id"][:8] + "...", mapping["evaluator_name"], mapping["score"]
+                )
+
+        except Exception as e:
+            # Handle missing feedback / SDK errors gracefully - never fail the experiment
+            logger.warning(
+                "Could not retrieve feedback IDs: %s. Continuing without feedback tracking.",
+                sanitize_text(str(e)),
+            )
+            self._feedback_mapping = []
+            feedback_ids = []
+
+        return feedback_ids
+
+    def _compute_evaluator_summary_from_native(
+        self,
+        evaluator_results_by_example: Dict[str, Dict[str, Dict]],
     ) -> Dict[str, Any]:
-        """Compute summary statistics for all evaluators."""
+        """Compute summary statistics from native experiment evaluator results.
+        
+        Args:
+            evaluator_results_by_example: Dict mapping example_id -> evaluator_name -> evaluator_result
+            
+        Returns:
+            Summary statistics dict
+        """
         summary = {}
-
+        
+        # Collect all evaluator names
         all_evaluators = {}
-        for name, results in programmatic_results.items():
-            all_evaluators[name] = results
-        for name, results in llm_judge_results.items():
-            all_evaluators[name] = results
-
-        for name, example_results_dict in all_evaluators.items():
-            results_list = list(example_results_dict.values())
+        for example_id, eval_results in evaluator_results_by_example.items():
+            for eval_name, eval_result in eval_results.items():
+                if eval_name not in all_evaluators:
+                    all_evaluators[eval_name] = []
+                all_evaluators[eval_name].append(eval_result)
+        
+        for name, results_list in all_evaluators.items():
             if not results_list:
                 continue
-
+            
             passed = sum(1 for r in results_list if r.get("passed") is True)
             failed = sum(1 for r in results_list if r.get("passed") is False)
             needs_review = sum(1 for r in results_list if r.get("status") == "needs_human_review")
             insufficient = sum(1 for r in results_list if r.get("status") == "insufficient_context")
             errors = sum(1 for r in results_list if r.get("status") == "error")
-
+            
             scores = [r.get("score") for r in results_list if r.get("score") is not None]
             avg_score = sum(scores) / len(scores) if scores else None
-
+            
             confidences = [r.get("confidence") for r in results_list if r.get("confidence") is not None]
             avg_confidence = sum(confidences) / len(confidences) if confidences else None
-
+            
             summary[name] = {
+                "total": len(results_list),
                 "passed": passed,
                 "failed": failed,
                 "needs_human_review": needs_review,
@@ -896,8 +843,35 @@ class NativeLangSmithExperimentRunner:
                 "average_score": round(avg_score, 3) if avg_score is not None else None,
                 "average_confidence": round(avg_confidence, 3) if avg_confidence is not None else None,
             }
-
+        
         return summary
+
+    def save_results(
+        self,
+        results: List[Dict[str, Any]],
+        summary: "NativeExperimentResult",
+        output_path: str,
+    ) -> None:
+        """Save experiment results to a JSON file.
+
+        Writes only metrics and ``case_id`` values — no raw clinical text.
+
+        Args:
+            results: Per-example result dicts (from ``run_experiment``).
+            summary: Experiment-level summary object.
+            output_path: Filesystem path to write JSON output.
+        """
+        output_data = {
+            "summary": summary.to_dict(),
+            "results": results,
+        }
+
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, indent=2, ensure_ascii=False)
+
+        logger.info("Experiment results saved to %s", output_path)
 
 
 # =============================================================================
@@ -912,11 +886,14 @@ async def upload_dataset_deduplicated(
     create_if_missing: bool = True,
     exclude_unverified: bool = True,
     update_existing: bool = False,
+    sanitize: bool = True,
 ) -> Dict[str, Any]:
     """Upload evaluation dataset with deduplication by case_id.
 
     Uses case_id from the source JSONL as the stable identifier.
     Checks for existing examples with the same case_id before uploading.
+
+    Phase 6.2: Applies PHI/sensitive data sanitization before upload (fail-closed).
 
     Args:
         filepath: Path to JSONL dataset file
@@ -926,12 +903,17 @@ async def upload_dataset_deduplicated(
         create_if_missing: Create dataset if it doesn't exist
         exclude_unverified: Exclude cases requiring human verification
         update_existing: If True, update existing examples; if False, skip them
+        sanitize: Whether to apply PHI sanitization (default: True, fail-closed)
 
     Returns:
         Upload results with deduplication stats
+
+    Raises:
+        SanitizationUploadError: If sensitive data is detected and cannot be safely handled
     """
     from app.ai.evaluation.dataset_schema import load_dataset
     from app.ai.evaluation.validation import validate_dataset
+    from app.ai.evaluation.langsmith_utils import upload_evaluation_cases, SanitizationUploadError
 
     client = create_langsmith_client(api_key)
 
@@ -985,58 +967,88 @@ async def upload_dataset_deduplicated(
     updated = 0
     validation_errors = []
     upload_errors = []
+    sanitization_errors = []
 
+    # Apply sanitization to new cases and update cases
     all_cases_to_upload = new_cases + [c for c, _ in update_cases]
-
-    if all_cases_to_upload:
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
-            for case in new_cases:
-                f.write(case.to_jsonl() + "\n")
-            temp_path = f.name
-
+    sanitized_cases = []
+    for case in all_cases_to_upload:
         try:
-            result = upload_dataset_from_file(
-                filepath=temp_path,
-                dataset_name=dataset_name,
-                api_key=api_key,
-                description=description,
-                create_if_missing=create_if_missing,
-            )
-            uploaded = result.get("uploaded", 0)
-            validation_errors = result.get("validation_errors", [])
-            upload_errors = result.get("upload_errors", [])
-        finally:
-            os.unlink(temp_path)
+            if sanitize:
+                sanitized_case = _sanitize_case_for_upload(case)
+                sanitized_cases.append(sanitized_case)
+            else:
+                sanitized_cases.append(case)
+        except SanitizationError as e:
+            logger.error("Sanitization failed for case %s: %s", case.id, e)
+            sanitization_errors.append({"case_id": case.id, "error": str(e)})
 
-        if update_cases:
-            for case, example_id in update_cases:
-                try:
-                    client.update_example(
-                        example_id=example_id,
-                        inputs={"question": case.question},
-                        outputs={
-                            "expected_answer": case.expected_answer,
-                            "reference_context": case.reference_context,
-                            "needs_human_verification": case.needs_human_verification,
-                            "metadata": case.metadata,
-                        },
-                        metadata={
-                            "case_id": case.id,
-                            "created_at": case.created_at,
-                            **case.metadata,
-                        },
-                    )
-                    updated += 1
-                except Exception as e:
-                    logger.warning("Failed to update example %s: %s", example_id, e)
-                    upload_errors.append({"example_id": str(example_id), "error": str(e)})
+    if sanitization_errors:
+        raise SanitizationUploadError(
+            f"Upload blocked: {len(sanitization_errors)} case(s) contain sensitive data that cannot be safely uploaded. "
+            f"Errors: {sanitization_errors}"
+        )
+
+    if sanitized_cases:
+        # Upload sanitized cases using the existing upload function
+        result = upload_evaluation_cases(
+            client=client,
+            dataset_name=dataset_name,
+            cases=sanitized_cases,
+            sanitize=False,  # Already sanitized
+        )
+        uploaded = result.get("uploaded", 0)
+        validation_errors = result.get("validation_errors", [])
+        upload_errors = result.get("upload_errors", [])
+
+    if update_cases:
+        for case, example_id in update_cases:
+            try:
+                # Sanitize update data
+                if sanitize:
+                    update_inputs = {"question": sanitize_text(case.question)}
+                    update_outputs = {
+                        "expected_answer": sanitize_text(case.expected_answer),
+                        "reference_context": sanitize_text(case.reference_context),
+                        "needs_human_verification": case.needs_human_verification,
+                        "metadata": sanitize_dict(case.metadata) if case.metadata else {},
+                    }
+                    update_metadata = {
+                        "case_id": case.id,
+                        "created_at": case.created_at,
+                        **(sanitize_dict(case.metadata) if case.metadata else {}),
+                    }
+                else:
+                    update_inputs = {"question": case.question}
+                    update_outputs = {
+                        "expected_answer": case.expected_answer,
+                        "reference_context": case.reference_context,
+                        "needs_human_verification": case.needs_human_verification,
+                        "metadata": case.metadata,
+                    }
+                    update_metadata = {
+                        "case_id": case.id,
+                        "created_at": case.created_at,
+                        **case.metadata,
+                    }
+                
+                client.update_example(
+                    example_id=example_id,
+                    inputs=update_inputs,
+                    outputs=update_outputs,
+                    metadata=update_metadata,
+                )
+                updated += 1
+            except Exception as e:
+                logger.warning("Failed to update example %s: %s", example_id, e)
+                upload_errors.append({"example_id": str(example_id), "error": str(e)})
 
     result = {
         "uploaded": uploaded,
         "updated": updated,
         "skipped_duplicates": skipped_duplicates,
         "validation_errors": validation_errors,
+        "sanitization_errors": sanitization_errors,
         "upload_errors": upload_errors,
         "total_cases": len(cases),
         "new_cases_uploaded": len(new_cases),

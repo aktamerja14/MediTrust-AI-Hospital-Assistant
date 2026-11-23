@@ -1,0 +1,394 @@
+{
+  "total_cases": 30,
+  "valid_cases": 30,
+  "invalid_cases": 0,
+  "duplicate_ids": [],
+  "category_distribution": {
+    "general_info": 4,
+    "hospital_faq": 4,
+    "medical_safety": 12,
+    "greetings": 4,
+    "multilingual": 2,
+    "edge_cases": 4
+  },
+  "language_distribution": {
+    "en": 26,
+    "gu": 2,
+    "hi": 2
+  },
+  "missing_fields": {
+    "question": [
+      "eval_021"
+    ]
+  },
+  "human_verification_required": [
+    "eval_007",
+    "eval_008",
+    "eval_009",
+    "eval_010",
+    "eval_016",
+    "eval_018",
+    "eval_019",
+    "eval_020",
+    "eval_023",
+    "eval_026",
+    "eval_027",
+    "eval_028",
+    "eval_029",
+    "eval_030"
+  ],
+  "unsupported_claims": [
+    {
+      "case_id": "eval_020",
+      "claim": "cure for",
+      "pattern": "\\b(effective treatment|cure for)\\b",
+      "category": "medical_safety",
+      "needs_verification": true
+    }
+  ],
+  "schema_errors": [],
+  "content_warnings": [
+    {
+      "case_id": "eval_007",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_008",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_009",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_010",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_011",
+      "severity": "warning",
+      "category": "content",
+      "message": "Low answer-context overlap (0.00) - answer may not be supported by context",
+      "field": "reference_context",
+      "suggestion": "Verify reference context contains information to answer the question"
+    },
+    {
+      "case_id": "eval_012",
+      "severity": "warning",
+      "category": "content",
+      "message": "Low answer-context overlap (0.00) - answer may not be supported by context",
+      "field": "reference_context",
+      "suggestion": "Verify reference context contains information to answer the question"
+    },
+    {
+      "case_id": "eval_013",
+      "severity": "info",
+      "category": "content",
+      "message": "Language marked as Gujarati but question doesn't appear to contain Gujarati script",
+      "field": "language",
+      "suggestion": "Verify language tag matches question content"
+    },
+    {
+      "case_id": "eval_014",
+      "severity": "info",
+      "category": "content",
+      "message": "Language marked as Hindi but question doesn't appear to contain Devanagari script",
+      "field": "language",
+      "suggestion": "Verify language tag matches question content"
+    },
+    {
+      "case_id": "eval_016",
+      "severity": "warning",
+      "category": "content",
+      "message": "Low answer-context overlap (0.02) - answer may not be supported by context",
+      "field": "reference_context",
+      "suggestion": "Verify reference context contains information to answer the question"
+    },
+    {
+      "case_id": "eval_021",
+      "severity": "warning",
+      "category": "content",
+      "message": "Question too short (0 chars)",
+      "field": "question",
+      "suggestion": "Ensure question is meaningful and specific"
+    },
+    {
+      "case_id": "eval_026",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_027",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_028",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_029",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    },
+    {
+      "case_id": "eval_030",
+      "severity": "info",
+      "category": "content",
+      "message": "Category is medical_safety but question doesn't appear to contain medical content",
+      "field": "category",
+      "suggestion": "Verify category matches question content"
+    }
+  ],
+  "medical_safety_flags": [
+    {
+      "case_id": "eval_001",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(timing|hours|available|schedule)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_002",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(timing|hours|available|schedule)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_003",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(service|department|clinic)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_004",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(phone|contact|number)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_005",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(dr\\.|doctor|physician)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_006",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(appointment|booking|schedule)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_008",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Expected answer contains medical claims without explicit disclaimer",
+      "field": "expected_answer",
+      "suggestion": "Verify this is intentional (e.g., educational content with implicit disclaimer in context)"
+    },
+    {
+      "case_id": "eval_010",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Expected answer contains medical claims without explicit disclaimer",
+      "field": "expected_answer",
+      "suggestion": "Verify this is intentional (e.g., educational content with implicit disclaimer in context)"
+    },
+    {
+      "case_id": "eval_017",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(timing|hours|available|schedule)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_020",
+      "severity": "warning",
+      "category": "medical_safety",
+      "message": "Potentially unsafe content in expected answer: Cure claim for chronic condition",
+      "field": "expected_answer",
+      "suggestion": "Review expected answer for medical safety compliance"
+    },
+    {
+      "case_id": "eval_024",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(dr\\.|doctor|physician)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_025",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Reference context contains hospital-specific info (matched: \\b(dr\\.|doctor|physician)\\b) - verify against approved documents",
+      "field": "reference_context",
+      "suggestion": "Mark needs_human_verification=true if info needs verification"
+    },
+    {
+      "case_id": "eval_026",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Expected answer contains medical claims without explicit disclaimer",
+      "field": "expected_answer",
+      "suggestion": "Verify this is intentional (e.g., educational content with implicit disclaimer in context)"
+    },
+    {
+      "case_id": "eval_027",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Expected answer contains medical claims without explicit disclaimer",
+      "field": "expected_answer",
+      "suggestion": "Verify this is intentional (e.g., educational content with implicit disclaimer in context)"
+    },
+    {
+      "case_id": "eval_030",
+      "severity": "info",
+      "category": "medical_safety",
+      "message": "Expected answer contains medical claims without explicit disclaimer",
+      "field": "expected_answer",
+      "suggestion": "Verify this is intentional (e.g., educational content with implicit disclaimer in context)"
+    }
+  ],
+  "verification_flags": [
+    {
+      "case_id": "eval_001",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (hours)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_002",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (hours)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_003",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (contact)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_004",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (dr.)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_005",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (dr.)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_006",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (appointment)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_015",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (doctor)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_017",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (available)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_021",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (doctor)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_022",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (doctor)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_024",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (dr.)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    },
+    {
+      "case_id": "eval_025",
+      "severity": "warning",
+      "category": "human_verification",
+      "message": "Case requires human verification (hospital info (dr.)) but needs_human_verification=false",
+      "field": "needs_human_verification",
+      "suggestion": "Set needs_human_verification=true and have medical professional verify"
+    }
+  ],
+  "is_valid": true,
+  "total_issues": 42
+}

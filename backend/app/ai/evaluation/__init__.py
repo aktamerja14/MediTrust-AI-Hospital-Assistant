@@ -60,6 +60,7 @@ from app.ai.evaluation.evaluators import (
 
 from app.ai.evaluation.langsmith_utils import (
     LangSmithUploadError,
+    SanitizationUploadError,
     create_langsmith_client,
     dataset_exists,
     create_dataset,
@@ -133,6 +134,17 @@ from app.ai.evaluation.langsmith_native import (
     DEFAULT_DATASET_NAME,
 )
 
+from app.ai.evaluation.langsmith_utils import (
+    # PHI/Sensitive Data Sanitization (Phase 6.2)
+    detect_sensitive_data,
+    sanitize_text,
+    sanitize_dict,
+    validate_no_sensitive_data,
+    validate_dict_no_sensitive_data,
+    SanitizationError,
+    SanitizationUploadError,
+)
+
 __all__ = [
     # Dataset schema
     "EvaluationCase",
@@ -156,6 +168,7 @@ __all__ = [
     "run_all_evaluators",
     # LangSmith utils
     "LangSmithUploadError",
+    "SanitizationUploadError",
     "create_langsmith_client",
     "dataset_exists",
     "create_dataset",
@@ -216,4 +229,11 @@ __all__ = [
     "upload_dataset_deduplicated",
     "native_validate_dataset_before_upload",
     "native_dry_run_dataset_upload",
+    # PHI/Sensitive Data Sanitization (Phase 6.2)
+    "detect_sensitive_data",
+    "sanitize_text",
+    "sanitize_dict",
+    "validate_no_sensitive_data",
+    "validate_dict_no_sensitive_data",
+    "SanitizationError",
 ]

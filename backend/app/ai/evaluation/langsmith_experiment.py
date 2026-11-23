@@ -51,6 +51,8 @@ from app.ai.evaluation.langsmith_utils import (
     DEFAULT_DATASET_NAME,
     LangSmithUploadError,
     list_datasets,
+    sanitize_experiment_payload,
+    ExperimentSanitizationError,
 )
 
 logger = logging.getLogger("meditrust.ai.evaluation.langsmith_experiment")
@@ -71,6 +73,7 @@ class ExperimentConfig:
     max_concurrent: int = 3
     max_examples: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
+    project: Optional[str] = None  # Phase 6.3: LangSmith project name
 
 
 @dataclass
@@ -135,7 +138,7 @@ class LangSmithExperimentRunner:
         """
         self.config = config
         self.rag_chain = rag_chain
-        self.client = client or create_langsmith_client(api_key)
+        self.client = client or create_langsmith_client(api_key, project=config.project)
         self._pipeline: Optional[OfflineEvaluationPipeline] = None
         self._programmatic_runner: Optional[EvaluatorRunner] = None
         self._llm_judge_runner: Optional[LLMJudgeRunner] = None
@@ -551,8 +554,11 @@ def upload_evaluation_dataset(
     description: str = "",
     create_if_missing: bool = True,
     exclude_unverified: bool = True,
+    sanitize: bool = True,
 ) -> Dict[str, Any]:
     """Upload evaluation dataset to LangSmith with filtering.
+
+    Phase 6.2: Applies PHI/sensitive data sanitization before upload (fail-closed).
 
     Args:
         filepath: Path to JSONL dataset file
@@ -561,6 +567,7 @@ def upload_evaluation_dataset(
         description: Dataset description
         create_if_missing: Create dataset if it doesn't exist
         exclude_unverified: Exclude cases requiring human verification
+        sanitize: Whether to apply PHI sanitization (default: True, fail-closed)
 
     Returns:
         Upload results
@@ -590,6 +597,7 @@ def upload_evaluation_dataset(
             api_key=api_key,
             description=description,
             create_if_missing=create_if_missing,
+            sanitize=sanitize,
         )
         return result
     finally:

@@ -4483,12 +4483,82 @@ class TestNativeLangSmithExperimentRunner:
         assert "llm_correctness" in names
 
 
+def _make_native_run(question, answer, run_id=None):
+    """Create a LangSmith Run for native experiment row tests."""
+    import time
+    from langsmith.schemas import Run
+    return Run(
+        id=run_id or uuid.uuid4(),
+        name="rag_generate",
+        run_type="chain",
+        start_time=time.time(),
+        inputs={"question": question, "category": "general_info", "language": "en", "tags": []},
+        outputs={"answer": answer, "sources": [], "has_context": True, "model": "test-model"},
+    )
+
+
+def _make_native_example(question, expected_answer, reference_context, example_id=None):
+    """Create a LangSmith Example for native experiment row tests."""
+    from langsmith.schemas import Example
+    return Example(
+        id=example_id or uuid.uuid4(),
+        inputs={"question": question, "category": "general_info", "language": "en", "tags": []},
+        outputs={
+            "expected_answer": expected_answer,
+            "reference_context": reference_context,
+            "needs_human_verification": False,
+        },
+    )
+
+
+def _make_native_row(run, example, evaluations):
+    """Build an ExperimentResultRow-shaped dict with LangSmith EvaluationResults."""
+    from langsmith.evaluation import EvaluationResult
+    results = [
+        EvaluationResult(
+            key=name,
+            score=details.get("score"),
+            value=details.get("value"),
+            comment=details.get("comment", ""),
+            metadata=details.get("metadata", {}),
+        )
+        for name, details in evaluations.items()
+    ]
+    return {"run": run, "example": example, "evaluation_results": {"results": results}}
+
+
+class _FakeAsyncExperimentResults:
+    """Minimal AsyncExperimentResults stand-in used by mocked aevaluate tests."""
+
+    def __init__(self, rows, experiment_id="exp-123", dataset_id="ds-123",
+                 experiment_name="test-exp", url="https://smith.langchain.com/projects/p/exp-123"):
+        self._rows = list(rows)
+        self.experiment_id = experiment_id
+        self.experiment_name = experiment_name
+        self.url = url
+        self._dataset_id = dataset_id
+
+    async def wait(self):
+        return None
+
+    async def get_dataset_id(self):
+        return self._dataset_id
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._rows:
+            return self._rows.pop(0)
+        raise StopAsyncIteration
+
+
 class TestNativeExperimentRun:
     """Tests for native experiment run_experiment method (mocked)."""
 
     @pytest.mark.asyncio
-    async def test_run_experiment_invokes_aevaluate(self, monkeypatch):
-        """Test that run_experiment invokes aevaluate and consumes results."""
+    async def test_run_experiment_invokes_aevaluate_once_and_uses_native_results(self, monkeypatch):
+        """run_experiment calls aevaluate once and builds reports from native rows."""
         from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
 
         config = NativeExperimentConfig(
@@ -4498,382 +4568,472 @@ class TestNativeExperimentRun:
             include_llm_judges=False,
             max_examples=2,
         )
-        runner = NativeLangSmithExperimentRunner(config=config)
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = []
+        runner = NativeLangSmithExperimentRunner(config=config, client=mock_client)
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
 
-        # Mock aevaluate to return an object with wait() method and experiment_id/experiment_name/url
+        run_1 = _make_native_run("Test 1?", "Generated 1")
+        run_2 = _make_native_run("Test 2?", "Generated 2")
+        rows = [
+            _make_native_row(
+                run_1,
+                _make_native_example("Test 1?", "Answer 1", "Context 1"),
+                {"correctness": {"score": 1.0, "value": "passed",
+                                 "metadata": {"passed": True, "issues": []}}},
+            ),
+            _make_native_row(
+                run_2,
+                _make_native_example("Test 2?", "Answer 2", "Context 2"),
+                {"correctness": {"score": 0.8, "value": "passed",
+                                 "metadata": {"passed": True, "issues": []}}},
+            ),
+        ]
+        fake_results = _FakeAsyncExperimentResults(
+            rows, experiment_id="exp-123", dataset_id="ds-123",
+            experiment_name="test-native-exp",
+        )
         call_log = []
 
-        class MockAsyncExperimentResults:
-            def __init__(self):
-                self.experiment_id = "exp-123"
-                self.experiment_name = "test-native-exp"
-                self.url = "https://smith.langchain.com/projects/p/exp-123"
-                self._results = []
-
-            async def wait(self):
-                pass
-
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                raise StopAsyncIteration
-
-            async def get_dataset_id(self):
-                return "ds-123"
-
         async def mock_aevaluate(*args, **kwargs):
-            call_log.append(("aevaluate", args, kwargs))
-            return MockAsyncExperimentResults()
+            call_log.append((args, kwargs))
+            return fake_results
 
         monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
 
-        # Mock _evaluate_examples_locally to return test data
-        async def mock_evaluate_locally():
-            return [
-                {
-                    "example_id": "ex-1",
-                    "question": "Test 1?",
-                    "expected_answer": "Answer 1",
-                    "actual_answer": "Generated 1",
-                    "reference_context": "Context 1",
-                    "retrieved_context": "Retrieved 1",
-                    "category": "general_info",
-                    "language": "en",
-                    "tags": [],
-                    "execution_status": "success",
-                    "error_message": None,
-                    "sources": [],
-                    "has_context": True,
-                    "model": "test-model",
-                    "doctor_recommendations": [],
-                    "disclaimer": "",
-                    "execution_time_ms": 100.0,
-                },
-                {
-                    "example_id": "ex-2",
-                    "question": "Test 2?",
-                    "expected_answer": "Answer 2",
-                    "actual_answer": "Generated 2",
-                    "reference_context": "Context 2",
-                    "retrieved_context": "Retrieved 2",
-                    "category": "medical_safety",
-                    "language": "en",
-                    "tags": [],
-                    "execution_status": "success",
-                    "error_message": None,
-                    "sources": [],
-                    "has_context": True,
-                    "model": "test-model",
-                    "doctor_recommendations": [],
-                    "disclaimer": "",
-                    "execution_time_ms": 150.0,
-                },
-            ]
+        detailed_results, summary = await runner.run_experiment()
 
-        monkeypatch.setattr(runner, "_evaluate_examples_locally", mock_evaluate_locally)
-
-        # Mock programmatic evaluators to return results
-        async def mock_run_programmatic(example_results):
-            return {
-                "ex-1": {"correctness": {"score": 0.9, "passed": True, "status": "passed"}},
-                "ex-2": {"correctness": {"score": 0.8, "passed": True, "status": "passed"}},
-            }
-
-        monkeypatch.setattr(runner, "_run_programmatic_on_examples", mock_run_programmatic)
-
-        # Mock LLM judges to return empty
-        async def mock_run_llm(example_results):
-            return {}
-
-        monkeypatch.setattr(runner, "_run_llm_judges_on_examples", mock_run_llm)
-
-        # Mock client creation to return a mock client
-        mock_client = MagicMock()
-        mock_client.list_examples = MagicMock(return_value=[])
-        monkeypatch.setattr("app.ai.evaluation.langsmith_native.create_langsmith_client", lambda api_key=None: mock_client)
-
-        try:
-            detailed_results, summary = await runner.run_experiment()
-        except Exception as e:
-            # We expect some errors due to mocking, but check that aevaluate was called
-            assert len(call_log) >= 1, "aevaluate should have been called"
-            raise
-
-        # Verify aevaluate was called
         assert len(call_log) == 1
-        call_entry = call_log[0]
-        call_args = call_entry[1]
-        call_kwargs = call_entry[2]
-        assert "target" in call_kwargs or len(call_args) > 0
+        _, call_kwargs = call_log[0]
+        assert call_kwargs["data"] == "test-dataset"
         assert "evaluators" in call_kwargs
-        assert "experiment_prefix" in call_kwargs
+        assert call_kwargs["experiment_prefix"] is None
+
+        assert len(detailed_results) == 2
+        assert summary.total_examples == 2
+        assert summary.successful == 2
+        assert summary.experiment_id == "exp-123"
+        assert summary.dataset_id == "ds-123"
+        assert summary.run_ids == [str(run_1.id), str(run_2.id)]
+        assert summary.evaluator_summary["correctness"]["passed"] == 2
+
+        # No second local RAG execution and no second evaluator execution.
+        assert runner._rag_chain.generate.await_count == 0
+        mock_client.list_examples.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_run_experiment_captures_experiment_id(self, monkeypatch):
-        """Test that run_experiment captures experiment ID from results."""
+    async def test_run_experiment_captures_experiment_id_and_url(self, monkeypatch):
+        """run_experiment captures experiment ID, URL, dataset ID, and run IDs."""
         from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
 
-        config = NativeExperimentConfig(experiment_name="test-exp")
-        runner = NativeLangSmithExperimentRunner(config=config)
+        config = NativeExperimentConfig(
+            experiment_name="test-exp",
+            dataset_name="test-dataset",
+            include_llm_judges=False,
+        )
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = []
+        runner = NativeLangSmithExperimentRunner(config=config, client=mock_client)
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
 
-        class MockAsyncExperimentResults:
-            def __init__(self):
-                self.experiment_id = "exp-456"
-                self.experiment_name = "test-exp"
-                self.url = "https://smith.langchain.com/projects/p/exp-456"
-                self._results = []
-
-            async def wait(self):
-                pass
-
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                raise StopAsyncIteration
-
-            async def get_dataset_id(self):
-                return "ds-456"
+        run = _make_native_run("Test?", "Answer")
+        row = _make_native_row(
+            run,
+            _make_native_example("Test?", "Answer", "Context"),
+            {"correctness": {"score": 1.0, "value": "passed",
+                             "metadata": {"passed": True}}},
+        )
+        fake_results = _FakeAsyncExperimentResults(
+            [row], experiment_id="exp-456", dataset_id="ds-456",
+            url="https://smith.langchain.com/projects/p/exp-456",
+        )
 
         async def mock_aevaluate(*args, **kwargs):
-            return MockAsyncExperimentResults()
+            return fake_results
 
         monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
 
-        async def mock_evaluate_locally():
-            return []
+        _, summary = await runner.run_experiment()
 
-        monkeypatch.setattr(runner, "_evaluate_examples_locally", mock_evaluate_locally)
-        monkeypatch.setattr(runner, "_run_programmatic_on_examples", lambda x: {})
-        monkeypatch.setattr(runner, "_run_llm_judges_on_examples", lambda x: {})
-
-        # Mock client creation to return a mock client
-        mock_client = MagicMock()
-        mock_client.list_examples = MagicMock(return_value=[])
-        monkeypatch.setattr("app.ai.evaluation.langsmith_native.create_langsmith_client", lambda api_key=None: mock_client)
-
-        try:
-            detailed_results, summary = await runner.run_experiment()
-        except Exception:
-            pass
-
-        # The summary should have captured the experiment ID
-        # Note: Due to mocking, this may not fully succeed, but the structure is correct
+        assert summary.experiment_id == "exp-456"
+        assert summary.langsmith_experiment_url == "https://smith.langchain.com/projects/p/exp-456"
+        assert summary.dataset_id == "ds-456"
+        assert summary.run_ids == [str(run.id)]
 
 
-class TestRunProgrammaticOnExamples:
-    """Tests for _run_programmatic_on_examples method."""
+class TestNativeResultExtraction:
+    """Tests for row-based _extract_results_from_experiment extraction."""
 
     @pytest.mark.asyncio
-    async def test_run_programmatic_on_examples_returns_results(self, sample_pipeline_result):
-        """Test that _run_programmatic_on_examples returns structured results."""
+    async def test_extract_results_from_native_rows(self):
+        """Extraction reads native LangSmith rows without re-running examples."""
         from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
 
-        config = NativeExperimentConfig(
-            experiment_name="test-exp",
-            evaluator_names=["correctness", "faithfulness"],
+        config = NativeExperimentConfig(experiment_name="test-exp", include_llm_judges=False)
+        runner = NativeLangSmithExperimentRunner(config=config, client=MagicMock())
+
+        run = _make_native_run("What are visiting hours?", "Visiting hours are 9 AM to 5 PM")
+        example = _make_native_example(
+            "What are visiting hours?", "9 AM to 5 PM", "Hospital hours: 9 AM to 5 PM"
         )
-        runner = NativeLangSmithExperimentRunner(config=config)
-
-        example_results = [
-            {
-                "example_id": "ex-1",
-                "question": "What are visiting hours?",
-                "expected_answer": "9 AM to 5 PM",
-                "actual_answer": "Visiting hours are 9 AM to 5 PM",
-                "reference_context": "Hospital hours: 9 AM to 5 PM",
-                "retrieved_context": "Hospital hours: 9 AM to 5 PM",
-                "category": "general_info",
-                "language": "en",
-                "tags": [],
-                "execution_status": "success",
-                "error_message": None,
-                "sources": [{"content_preview": "Hospital hours: 9 AM to 5 PM"}],
-                "has_context": True,
-                "model": "test-model",
-                "doctor_recommendations": [],
-                "disclaimer": "",
-                "execution_time_ms": 100.0,
-            }
-        ]
-
-        results = await runner._run_programmatic_on_examples(example_results)
-
-        assert "ex-1" in results
-        assert "correctness" in results["ex-1"]
-        assert "faithfulness" in results["ex-1"]
-
-        for eval_name in ["correctness", "faithfulness"]:
-            eval_result = results["ex-1"][eval_name]
-            assert "score" in eval_result
-            assert "passed" in eval_result
-            assert "status" in eval_result
-            assert "reason" in eval_result
-            assert "issues" in eval_result
-            assert "metadata" in eval_result
-
-    @pytest.mark.asyncio
-    async def test_run_programmatic_status_mapping(self):
-        """Test that status mapping is correct (PASSED=1.0, FAILED=0.0, others=None)."""
-        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
-        from app.ai.evaluation.programmatic_evaluators import EvaluationStatus
-
-        config = NativeExperimentConfig(
-            experiment_name="test-exp",
-            evaluator_names=["correctness"],
-        )
-        runner = NativeLangSmithExperimentRunner(config=config)
-
-        # Test with a case that will PASSED (perfect match)
-        example_results = [
-            {
-                "example_id": "ex-1",
-                "question": "Test?",
-                "expected_answer": "Exact match answer",
-                "actual_answer": "Exact match answer",
-                "reference_context": "Context",
-                "retrieved_context": "Context",
-                "category": "general_info",
-                "language": "en",
-                "tags": [],
-                "execution_status": "success",
-                "error_message": None,
-                "sources": [{"content_preview": "Context"}],
-                "has_context": True,
-                "model": "test-model",
-                "doctor_recommendations": [],
-                "disclaimer": "",
-                "execution_time_ms": 100.0,
-            }
-        ]
-
-        results = await runner._run_programmatic_on_examples(example_results)
-        correctness_result = results["ex-1"]["correctness"]
-
-        # For perfect match, status should be PASSED and score=1.0
-        assert correctness_result["status"] == "passed"
-        assert correctness_result["score"] == 1.0
-        assert correctness_result["passed"] is True
-
-    @pytest.mark.asyncio
-    async def test_run_programmatic_non_scorable_status_none(self):
-        """Test that non-scorable statuses (NEEDS_HUMAN_REVIEW, INSUFFICIENT_CONTEXT, ERROR) have score=None."""
-        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
-        from app.ai.evaluation.programmatic_evaluators import evaluate_faithfulness
-
-        config = NativeExperimentConfig(
-            experiment_name="test-exp",
-            evaluator_names=["faithfulness"],
-        )
-        runner = NativeLangSmithExperimentRunner(config=config)
-
-        # Test with missing retrieved context - should be INSUFFICIENT_CONTEXT
-        example_results = [
-            {
-                "example_id": "ex-1",
-                "question": "Test?",
-                "expected_answer": "Answer",
-                "actual_answer": "Some answer",
-                "reference_context": "Context",
-                "retrieved_context": "",  # Missing context
-                "category": "general_info",
-                "language": "en",
-                "tags": [],
-                "execution_status": "success",
-                "error_message": None,
-                "sources": [],
-                "has_context": False,
-                "model": "test-model",
-                "doctor_recommendations": [],
-                "disclaimer": "",
-                "execution_time_ms": 100.0,
-            }
-        ]
-
-        results = await runner._run_programmatic_on_examples(example_results)
-        faithfulness_result = results["ex-1"]["faithfulness"]
-
-        # For INSUFFICIENT_CONTEXT, score should be None
-        assert faithfulness_result["status"] == "insufficient_context"
-        assert faithfulness_result["score"] is None
-        assert faithfulness_result["passed"] is None
-
-
-class TestRunLLMJudgesOnExamples:
-    """Tests for _run_llm_judges_on_examples method."""
-
-    @pytest.mark.asyncio
-    async def test_run_llm_judges_on_examples_returns_results(self, sample_pipeline_result, monkeypatch):
-        """Test that _run_llm_judges_on_examples returns structured results."""
-        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
-        from app.ai.evaluation.llm_judges import CorrectnessJudge
-
-        config = NativeExperimentConfig(
-            experiment_name="test-exp",
-            evaluator_names=["llm_correctness"],
-        )
-        runner = NativeLangSmithExperimentRunner(config=config)
-
-        # Mock the judge evaluate method
-        mock_judge = MagicMock()
-        mock_judge.evaluate = AsyncMock(return_value=type('obj', (object,), {
-            'evaluator_name': 'llm_correctness',
-            'evaluation_id': 'ex-1',
-            'score': 0.9,
-            'passed': True,
-            'status': JudgeStatus.PASSED,
-            'reasoning': 'Correct answer',
-            'evidence': ['Key fact 1'],
-            'issues': [],
-            'confidence': 0.95,
-            'judge_model': 'test-model',
-            'judge_provider': 'test',
-            'metadata': {},
-        })())
-
-        monkeypatch.setattr("app.ai.evaluation.langsmith_native.LLM_JUDGES", {
-            "llm_correctness": lambda: mock_judge
+        row = _make_native_row(run, example, {
+            "correctness": {
+                "score": 1.0, "value": "passed", "comment": "Matches reference",
+                "metadata": {"passed": True, "issues": [], "confidence": 0.9},
+            },
+            "faithfulness": {
+                "score": None, "value": "insufficient_context", "comment": "No context",
+                "metadata": {"passed": None, "issues": ["No retrieved context"]},
+            },
         })
 
-        example_results = [
-            {
-                "example_id": "ex-1",
-                "question": "What are visiting hours?",
-                "expected_answer": "9 AM to 5 PM",
-                "actual_answer": "Visiting hours are 9 AM to 5 PM",
-                "reference_context": "Hospital hours: 9 AM to 5 PM",
-                "retrieved_context": "Hospital hours: 9 AM to 5 PM",
-                "category": "general_info",
-                "language": "en",
-                "tags": [],
-                "execution_status": "success",
-                "error_message": None,
-                "sources": [{"content_preview": "Hospital hours: 9 AM to 5 PM"}],
-                "has_context": True,
-                "model": "test-model",
-                "doctor_recommendations": [],
-                "disclaimer": "",
-                "execution_time_ms": 100.0,
-            }
+        results = await runner._extract_results_from_experiment([row], [str(run.id)])
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.example_id == str(example.id)
+        assert result.run_id == str(run.id)
+        assert result.question == "What are visiting hours?"
+        assert result.actual_answer == "Visiting hours are 9 AM to 5 PM"
+        assert result.expected_answer == "9 AM to 5 PM"
+        assert result.reference_context == "Hospital hours: 9 AM to 5 PM"
+        assert result.execution_status == "success"
+
+        correctness = result.evaluator_results["correctness"]
+        assert correctness["score"] == 1.0
+        assert correctness["passed"] is True
+        assert correctness["status"] == "passed"
+        assert correctness["reason"] == "Matches reference"
+
+        faithfulness = result.evaluator_results["faithfulness"]
+        assert faithfulness["score"] is None
+        assert faithfulness["passed"] is None
+        assert faithfulness["status"] == "insufficient_context"
+        assert faithfulness["issues"] == ["No retrieved context"]
+
+    @pytest.mark.asyncio
+    async def test_extract_results_status_mapping(self):
+        """Native evaluation values map to report statuses consistently."""
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        config = NativeExperimentConfig(experiment_name="test-exp", include_llm_judges=False)
+        runner = NativeLangSmithExperimentRunner(config=config, client=MagicMock())
+
+        run = _make_native_run("Test?", "Answer")
+        example = _make_native_example("Test?", "Answer", "Context")
+        row = _make_native_row(run, example, {
+            "passed": {"score": 1.0, "value": "passed", "metadata": {"passed": True}},
+            "failed": {"score": 0.0, "value": "failed", "metadata": {"passed": False}},
+            "review": {"score": None, "value": "needs_human_review", "metadata": {"passed": None}},
+            "insufficient": {"score": None, "value": "insufficient_context", "metadata": {"passed": None}},
+            "error": {"score": None, "value": "error", "metadata": {"passed": None}},
+        })
+
+        results = await runner._extract_results_from_experiment([row], [str(run.id)])
+        evaluators = results[0].evaluator_results
+
+        assert evaluators["passed"]["status"] == "passed"
+        assert evaluators["passed"]["passed"] is True
+        assert evaluators["failed"]["status"] == "failed"
+        assert evaluators["failed"]["passed"] is False
+        for key in ("review", "insufficient", "error"):
+            assert evaluators[key]["score"] is None
+            assert evaluators[key]["passed"] is None
+
+    @pytest.mark.asyncio
+    async def test_extract_results_handles_missing_evaluation_results(self):
+        """Rows without evaluation_results do not crash extraction."""
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(experiment_name="test-exp", include_llm_judges=False),
+            client=MagicMock(),
+        )
+        run = _make_native_run("Test?", "Answer")
+        example = _make_native_example("Test?", "Answer", "Context")
+
+        results = await runner._extract_results_from_experiment(
+            [{"run": run, "example": example, "evaluation_results": {}}], [str(run.id)]
+        )
+
+        assert len(results) == 1
+        assert results[0].evaluator_results == {}
+
+    @pytest.mark.asyncio
+    async def test_extract_results_does_not_requery_langsmith(self):
+        """Extraction must use supplied rows, not call list_examples/list_feedback."""
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        mock_client = MagicMock()
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(experiment_name="test-exp", include_llm_judges=False),
+            client=mock_client,
+        )
+        run = _make_native_run("Test?", "Answer")
+        example = _make_native_example("Test?", "Answer", "Context")
+        row = _make_native_row(run, example, {"correctness": {"score": 1.0, "value": "passed"}})
+
+        await runner._extract_results_from_experiment([row], [str(run.id)])
+
+        mock_client.list_examples.assert_not_called()
+        mock_client.list_feedback.assert_not_called()
+
+
+class TestLLMJudgeFeedbackSanitization:
+    """Tests for PHI sanitization on native LLM judge feedback."""
+
+    @pytest.mark.asyncio
+    async def test_llm_judge_wrapper_sanitizes_reasoning_evidence_issues(self):
+        from app.ai.evaluation.langsmith_native import LLMJudgeWrapper
+        from app.ai.evaluation.llm_judges import JudgeStatus, LLMJudgeResult
+
+        mock_judge = MagicMock()
+        mock_judge.evaluate = AsyncMock(return_value=LLMJudgeResult(
+            evaluator_name="llm_correctness",
+            evaluation_id="ex-1",
+            score=0.9,
+            passed=True,
+            status=JudgeStatus.PASSED,
+            reasoning="Patient John Doe has diabetes and takes metformin.",
+            evidence=["John Doe SSN 123-45-6789", "Call 555-123-4567"],
+            issues=["Patient John Doe needs follow-up"],
+            confidence=0.95,
+            judge_model="test-model",
+            judge_provider="test",
+            metadata={"notes": "Patient John Doe record"},
+        ))
+
+        wrapper = LLMJudgeWrapper("llm_correctness", mock_judge)
+        run = _make_native_run("Test?", "Answer")
+        example = _make_native_example("Test?", "Answer", "Context")
+
+        result = await wrapper.aevaluate_run(run, example)
+
+        serialized = f"{result.comment} {result.metadata}"
+        assert "John Doe" not in serialized
+        assert "diabetes" not in serialized.lower()
+        assert "metformin" not in serialized.lower()
+        assert "123-45-6789" not in serialized
+        assert "555-123-4567" not in serialized
+        assert "[REDACTED" in serialized
+
+    @pytest.mark.asyncio
+    async def test_llm_judge_wrapper_sanitizes_exception_message(self):
+        from app.ai.evaluation.langsmith_native import LLMJudgeWrapper
+
+        mock_judge = MagicMock()
+        mock_judge.evaluate = AsyncMock(
+            side_effect=RuntimeError("Patient John Doe SSN 123-45-6789 failed")
+        )
+        wrapper = LLMJudgeWrapper("llm_correctness", mock_judge)
+        run = _make_native_run("Test?", "Answer")
+        example = _make_native_example("Test?", "Answer", "Context")
+
+        result = await wrapper.aevaluate_run(run, example)
+
+        serialized = f"{result.comment} {result.metadata}"
+        assert "John Doe" not in serialized
+        assert "123-45-6789" not in serialized
+        assert result.value == "error"
+
+
+def _make_feedback(run_id, key="correctness", score=1.0, value="passed", comment="ok"):
+    """Create a real LangSmith Feedback object for feedback-tracking tests."""
+    import datetime
+    from langsmith.schemas import Feedback
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return Feedback(
+        id=uuid.uuid4(),
+        run_id=run_id,
+        trace_id=uuid.uuid4(),
+        key=key,
+        score=score,
+        value=value,
+        comment=comment,
+        created_at=now,
+        modified_at=now,
+    )
+
+
+class TestNoDuplicateExecution:
+    """Ensures native aevaluate is the only execution path."""
+
+    @pytest.mark.asyncio
+    async def test_run_experiment_does_not_rerun_rag_or_evaluators_locally(self, monkeypatch):
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = []
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(
+                experiment_name="test-exp", dataset_name="test-dataset", include_llm_judges=False
+            ),
+            client=mock_client,
+        )
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
+
+        sentinel_evaluator = MagicMock()
+        sentinel_evaluator.name = "correctness"
+        sentinel_evaluator.evaluate_run = MagicMock()
+        sentinel_evaluator.aevaluate_run = AsyncMock()
+        monkeypatch.setattr(runner, "_get_evaluator_list", lambda: [sentinel_evaluator])
+
+        run = _make_native_run("Test?", "Answer")
+        row = _make_native_row(
+            run,
+            _make_native_example("Test?", "Answer", "Context"),
+            {"correctness": {"score": 1.0, "value": "passed"}},
+        )
+
+        async def mock_aevaluate(*args, **kwargs):
+            return _FakeAsyncExperimentResults([row])
+
+        monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
+
+        await runner.run_experiment()
+
+        runner._rag_chain.generate.assert_not_called()
+        sentinel_evaluator.evaluate_run.assert_not_called()
+        sentinel_evaluator.aevaluate_run.assert_not_called()
+        mock_client.list_examples.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_native_results_are_not_recomputed_for_summary(self, monkeypatch):
+        """Summary values come from native rows, not local evaluator reruns."""
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = []
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(
+                experiment_name="test-exp", dataset_name="test-dataset", include_llm_judges=False
+            ),
+            client=mock_client,
+        )
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
+
+        run_1 = _make_native_run("Q1?", "A1")
+        run_2 = _make_native_run("Q2?", "A2")
+        rows = [
+            _make_native_row(run_1, _make_native_example("Q1?", "A1", "C1"), {
+                "correctness": {"score": 1.0, "value": "passed",
+                                "metadata": {"passed": True}},
+            }),
+            _make_native_row(run_2, _make_native_example("Q2?", "A2", "C2"), {
+                "correctness": {"score": 0.0, "value": "failed",
+                                "metadata": {"passed": False}},
+            }),
         ]
 
-        results = await runner._run_llm_judges_on_examples(example_results)
+        async def mock_aevaluate(*args, **kwargs):
+            return _FakeAsyncExperimentResults(rows)
 
-        assert "ex-1" in results
-        assert "llm_correctness" in results["ex-1"]
+        monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
 
-        eval_result = results["ex-1"]["llm_correctness"]
-        assert "score" in eval_result
-        assert "passed" in eval_result
-        assert "status" in eval_result
-        assert "reasoning" in eval_result
-        assert "evidence" in eval_result
-        assert "issues" in eval_result
-        assert "confidence" in eval_result
-        assert "judge_model" in eval_result
-        assert "judge_provider" in eval_result
-        assert "metadata" in eval_result
+        _, summary = await runner.run_experiment()
+
+        correctness = summary.evaluator_summary["correctness"]
+        assert correctness["passed"] == 1
+        assert correctness["failed"] == 1
+        assert correctness["total"] == 2
+        assert summary.total_examples == 2
+        assert summary.successful == 2
+
+
+class TestFeedbackIdTracking:
+    """Tests for feedback ID retrieval and mapping."""
+
+    @pytest.mark.asyncio
+    async def test_retrieve_feedback_ids_uses_list_feedback_run_ids(self):
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        run_1, run_2 = uuid.uuid4(), uuid.uuid4()
+        feedback_1 = _make_feedback(run_1, key="correctness", score=1.0, value="passed")
+        feedback_2 = _make_feedback(run_2, key="faithfulness", score=0.0, value="failed")
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = [feedback_1, feedback_2]
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(experiment_name="test-exp"), client=mock_client
+        )
+
+        ids = await runner._retrieve_feedback_ids("exp-1", [str(run_1), str(run_2)])
+
+        assert ids == [str(feedback_1.id), str(feedback_2.id)]
+        assert len(runner._feedback_mapping) == 2
+        assert runner._feedback_mapping[0]["run_id"] == str(run_1)
+        assert runner._feedback_mapping[0]["evaluator_name"] == "correctness"
+        assert runner._feedback_mapping[0]["score"] == 1.0
+        mock_client.list_feedback.assert_called_once_with(run_ids=[str(run_1), str(run_2)])
+
+    @pytest.mark.asyncio
+    async def test_retrieve_feedback_ids_missing_feedback(self):
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = []
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(experiment_name="test-exp"), client=mock_client
+        )
+
+        ids = await runner._retrieve_feedback_ids("exp-1", [str(uuid.uuid4())])
+
+        assert ids == []
+        assert runner._feedback_mapping == []
+
+    @pytest.mark.asyncio
+    async def test_retrieve_feedback_ids_sdk_error_is_graceful(self):
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        mock_client = MagicMock()
+        mock_client.list_feedback.side_effect = RuntimeError("langsmith unavailable")
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(experiment_name="test-exp"), client=mock_client
+        )
+
+        ids = await runner._retrieve_feedback_ids("exp-1", [str(uuid.uuid4())])
+
+        assert ids == []
+        assert runner._feedback_mapping == []
+
+    @pytest.mark.asyncio
+    async def test_run_experiment_persists_feedback_mapping(self, monkeypatch):
+        from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
+
+        run = _make_native_run("Test?", "Answer")
+        feedback = _make_feedback(run.id, key="correctness", score=1.0, value="passed")
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = [feedback]
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(
+                experiment_name="test-exp", dataset_name="test-dataset", include_llm_judges=False
+            ),
+            client=mock_client,
+        )
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
+
+        row = _make_native_row(
+            run,
+            _make_native_example("Test?", "Answer", "Context"),
+            {"correctness": {"score": 1.0, "value": "passed"}},
+        )
+
+        async def mock_aevaluate(*args, **kwargs):
+            return _FakeAsyncExperimentResults([row])
+
+        monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
+
+        _, summary = await runner.run_experiment()
+
+        assert summary.feedback_ids == [str(feedback.id)]
+        assert len(summary.feedback_mapping) == 1
+        assert summary.feedback_mapping[0]["run_id"] == str(run.id)
+        assert summary.feedback_mapping[0]["evaluator_name"] == "correctness"
+        assert summary.feedback_mapping[0]["score"] == 1.0
 
 
 class TestDatasetDeduplication:
@@ -5119,86 +5279,82 @@ class TestEvaluatorStatusMapping:
 
 
 class TestExperimentPersistence:
-    """Tests for experiment persistence verification."""
+    """Tests that native experiment identifiers are persisted in the summary."""
 
     @pytest.mark.asyncio
-    async def test_experiment_id_captured(self, monkeypatch):
-        """Test that experiment ID is captured from aevaluate results."""
+    async def test_summary_persists_experiment_identifiers(self, monkeypatch):
         from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
 
-        config = NativeExperimentConfig(experiment_name="test-exp")
-        runner = NativeLangSmithExperimentRunner(config=config)
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = []
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(
+                experiment_name="test-exp", dataset_name="test-dataset", include_llm_judges=False
+            ),
+            client=mock_client,
+        )
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
 
-        mock_experiment = MagicMock()
-        mock_experiment.id = "exp-captured-123"
-        mock_experiment.url = "https://smith.langchain.com/projects/p/exp-captured-123"
+        run = _make_native_run("Test?", "Answer")
+        row = _make_native_row(
+            run,
+            _make_native_example("Test?", "Answer", "Context"),
+            {"correctness": {"score": 1.0, "value": "passed"}},
+        )
 
         async def mock_aevaluate(*args, **kwargs):
-            async def empty_iter():
-                return
-                yield
-            return empty_iter()
+            return _FakeAsyncExperimentResults(
+                [row], experiment_id="exp-captured-123", dataset_id="ds-captured-123",
+                url="https://smith.langchain.com/projects/p/exp-captured-123",
+            )
 
         monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
 
-        async def mock_evaluate_locally():
-            return []
+        _, summary = await runner.run_experiment()
 
-        monkeypatch.setattr(runner, "_evaluate_examples_locally", mock_evaluate_locally)
-        monkeypatch.setattr(runner, "_run_programmatic_on_examples", lambda x: {})
-        monkeypatch.setattr(runner, "_run_llm_judges_on_examples", lambda x: {})
-
-        # Mock client creation to return a mock client
-        mock_client = MagicMock()
-        mock_client.list_examples = MagicMock(return_value=[])
-        monkeypatch.setattr("app.ai.evaluation.langsmith_native.create_langsmith_client", lambda api_key=None: mock_client)
-
-        try:
-            detailed_results, summary = await runner.run_experiment()
-        except Exception:
-            pass
-
-        # The summary should have captured the experiment ID
-        # This is a structural test - the actual capture happens in the real run_experiment
+        assert summary.experiment_id == "exp-captured-123"
+        assert summary.dataset_id == "ds-captured-123"
+        assert summary.langsmith_experiment_url == "https://smith.langchain.com/projects/p/exp-captured-123"
+        assert summary.run_ids == [str(run.id)]
+        assert summary.duration_seconds >= 0
 
     @pytest.mark.asyncio
-    async def test_run_ids_captured(self, monkeypatch):
-        """Test that run IDs are captured from experiment results."""
+    async def test_summary_to_dict_contains_native_fields(self, monkeypatch):
         from app.ai.evaluation.langsmith_native import NativeLangSmithExperimentRunner, NativeExperimentConfig
 
-        config = NativeExperimentConfig(experiment_name="test-exp")
-        runner = NativeLangSmithExperimentRunner(config=config)
+        feedback_run = _make_native_run("Test?", "Answer")
+        feedback = _make_feedback(feedback_run.id, key="correctness")
+        mock_client = MagicMock()
+        mock_client.list_feedback.return_value = [feedback]
+        runner = NativeLangSmithExperimentRunner(
+            config=NativeExperimentConfig(
+                experiment_name="test-exp", dataset_name="test-dataset", include_llm_judges=False
+            ),
+            client=mock_client,
+        )
+        runner._rag_chain = MagicMock()
+        runner._rag_chain.generate = AsyncMock()
 
-        mock_experiment = MagicMock()
-        mock_experiment.id = "exp-123"
-        mock_experiment.url = "https://smith.langchain.com/projects/p/exp-123"
+        row = _make_native_row(
+            feedback_run,
+            _make_native_example("Test?", "Answer", "Context"),
+            {"correctness": {"score": 1.0, "value": "passed"}},
+        )
 
         async def mock_aevaluate(*args, **kwargs):
-            async def empty_iter():
-                return
-                yield
-            return empty_iter()
+            return _FakeAsyncExperimentResults([row], experiment_id="exp-789", dataset_id="ds-789")
 
         monkeypatch.setattr("app.ai.evaluation.langsmith_native.aevaluate", mock_aevaluate)
 
-        async def mock_evaluate_locally():
-            return []
+        _, summary = await runner.run_experiment()
+        data = summary.to_dict()
 
-        monkeypatch.setattr(runner, "_evaluate_examples_locally", mock_evaluate_locally)
-        monkeypatch.setattr(runner, "_run_programmatic_on_examples", lambda x: {})
-        monkeypatch.setattr(runner, "_run_llm_judges_on_examples", lambda x: {})
-
-        # Mock client creation to return a mock client
-        mock_client = MagicMock()
-        mock_client.list_examples = MagicMock(return_value=[])
-        monkeypatch.setattr("app.ai.evaluation.langsmith_native.create_langsmith_client", lambda api_key=None: mock_client)
-
-        try:
-            detailed_results, summary = await runner.run_experiment()
-        except Exception:
-            pass
-
-        # Structural test - run_ids should be captured in real implementation
+        assert data["experiment_id"] == "exp-789"
+        assert data["dataset_id"] == "ds-789"
+        assert data["run_ids"] == [str(feedback_run.id)]
+        assert data["feedback_ids"] == [str(feedback.id)]
+        assert data["feedback_mapping"][0]["run_id"] == str(feedback_run.id)
 
 
 class TestPrivacyAndSafety:

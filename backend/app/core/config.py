@@ -112,6 +112,20 @@ class Settings(BaseSettings):
     # CHANGE HERE: Number of chunks to retrieve for context.
     RAG_TOP_K: int = 4
 
+    # ==========================================
+    # LANGSMITH CONFIGURATION (Evaluation / Tracing)
+    # ==========================================
+    # LANGSMITH_API_KEY must be set via environment variable only — never commit it.
+    # Get from: https://smith.langchain.com/settings
+    LANGSMITH_API_KEY: str = ""
+
+    # LangSmith project name.  All experiment traces and evaluation runs land here.
+    # Override with LANGSMITH_PROJECT=<your-project> in backend/.env.
+    LANGSMITH_PROJECT: str = "meditrust-rag-evaluation"
+
+    # Set to "true" to enable automatic tracing of RAG chain calls.
+    LANGSMITH_TRACING: str = "false"
+
     model_config = SettingsConfigDict(
         env_file=(str(BACKEND_ENV_FILE), ".env"),
         env_file_encoding="utf-8",
